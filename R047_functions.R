@@ -102,8 +102,7 @@ merge_episodes <- function(data, pid) {
     }
   }
   
-  # Finalize the last interval. If no interval was finalized in the loop,
-  # we have only one interval; otherwise, label this one as the last.
+  # Finalize the last interval.
   label_text <- if (length(merged_intervals) == 0) {
     "first interval, last interval"
   } else {
@@ -131,8 +130,14 @@ merge_episodes <- function(data, pid) {
     stringsAsFactors   = FALSE
   )
   
-  # Combine all merged intervals into a single data frame and return it
+  # Combine all merged intervals into a single data frame
   result_df <- do.call(rbind, merged_intervals)
+  
+  # Check if no merging occurred (more than one original episode and the merged intervals
+  # count equals the number of original rows). If so, print a warning.
+  if(nrow(df) > 1 && nrow(result_df) == nrow(df)) {
+    warning("merge_episodes: episodes for pers_id '", pid, "' are already in their simplest form. No merging performed.")
+  }
+  
   return(result_df)
 }
-
