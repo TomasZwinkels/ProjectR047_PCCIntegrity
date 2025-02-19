@@ -23,7 +23,8 @@
 		# install.packages("readr")
 		# install.packages("dplyr")
 		# install.packages("writexl")
-	
+		# install.packages("testthat")
+
 	# packages
 		library(sqldf)
 		library(stringr)
@@ -32,11 +33,13 @@
 		library(dplyr)
 		library(writexl)
 		library(openxlsx)
-
-	substrRight <- function(x, n)
-	{
-		substr(x, nchar(x)-n+1, nchar(x))
-	}	
+		library(testthat)
+		
+	# Load some custom functions
+		source("R047_functions.R")
+		
+	# Run the unit tests from my test file
+		test_file("R047_unittests.R")
 	
 	# import and inspect all the PCC data-frames
 				
@@ -160,45 +163,134 @@
 							   fromLast = TRUE),
 				]
 		
-		nrow(FDUBS) # OK, almost all cases are fixed now.
+		nrow(FDUBS) # OK, all cases are fixed now.
 		
 		# show for inspection and so cases can be fixed.
 		FDUBS[,c("res_entry_id","pers_id","res_entry_start","","res_entry_end","res_entry_raw")]
 	
 		
-	
 	# almost the exact same start AND OR endate (say 2 day different)
 	
-	# focus on core variables
-		RECO <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
-	
-	AFDUBS <- RECO %>%
-		  # 1. Add a ROWID so we can avoid matching the same row to itself
-		  mutate(ROWID = row_number()) %>%
-		  
-		  # 2. Self-join on pers_id to compare every row with every other row
-		  inner_join(
-			RECO %>% mutate(ROWID = row_number()),
-			by = "pers_id",
-			suffix = c(".x", ".y")
-		  ) %>%
-		  
-		  # 3. Filter to keep only pairs of rows that
-		  #    - are not the exact same row (ROWID.x < ROWID.y)
-		  #    - have start dates within 2 days
-		  #    - have end dates within 2 days
-		  filter(
-			ROWID.x < ROWID.y,
-			abs(difftime(res_entry_start_posoxctformat.x, 
-						 res_entry_start_posoxctformat.y, 
-						 units = "days")) <= 2,
-			abs(difftime(res_entry_end_posoxctformat.x, 
-						 res_entry_end_posoxctformat.y, 
-						 units = "days")) <= 2
-		  )
-	
-	nrow(AFDUBS) # alright, another 197 cases that need to be fixed!
-	head(AFDUBS)
+		# focus on core variables
+			RECO <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
 		
-		# show for inspection and so cases can be fixed.
+			AFDUBS <- RECO %>%
+				  # 1. Add a ROWID so we can avoid matching the same row to itself
+				  mutate(ROWID = row_number()) %>%
+				  
+				  # 2. Self-join on pers_id to compare every row with every other row
+				  inner_join(
+					RECO %>% mutate(ROWID = row_number()),
+					by = "pers_id",
+					suffix = c(".x", ".y")
+				  ) %>%
+				  
+				  # 3. Filter to keep only pairs of rows that
+				  #    - are not the exact same row (ROWID.x < ROWID.y)
+				  #    - have start dates within 2 days
+				  #    - have end dates within 2 days
+				  filter(
+					ROWID.x < ROWID.y,
+					abs(difftime(res_entry_start_posoxctformat.x, 
+								 res_entry_start_posoxctformat.y, 
+								 units = "days")) <= 2,
+					abs(difftime(res_entry_end_posoxctformat.x, 
+								 res_entry_end_posoxctformat.y, 
+								 units = "days")) <= 2
+				  )
+			
+			nrow(AFDUBS) # alright, also all fixed now
+			head(AFDUBS)
+		
+		# show for inspection and so cases can be fixed. # only one case left now: was already fixed in the excel file
 		AFDUBS[,c("res_entry_id.x","pers_id","res_entry_start.x","res_entry_end.x","res_entry_start.y","res_entry_end.y","res_entry_raw.x")]
+		
+		# alright, so the next step is find episodes with any overal for the same person
+		
+		return_overlap <- function(df) {
+			  df %>%
+				mutate(ROWID = row_number()) %>%
+				inner_join(df %>% mutate(ROWID = row_number()),
+						   by = "pers_id",
+						   suffix = c(".x", ".y")) %>%
+				# Only compare each pair once (ROWID.x < ROWID.y) and check for overlapping intervals
+				filter(ROWID.x < ROWID.y,
+					   res_entry_start_posoxctformat.x <= res_entry_end_posoxctformat.y,
+					   res_entry_start_posoxctformat.y <= res_entry_end_posoxctformat.x) %>%
+				# Select key variables for inspection
+				select(res_entry_id.x,
+					   pers_id,
+					   res_entry_start.x,
+					   res_entry_end.x,
+					   res_entry_raw.x,
+					   res_entry_id.y,
+					   res_entry_start.y,
+					   res_entry_end.y,
+					   res_entry_raw.y)
+			}
+
+	
+		OVERLAP <- return_overlap(RESE) # please note that the 'many-to-many' error makes sense here
+			
+			# get a vector with all the unique pers_ids that have overlapping eppisodes
+			allpersonswithoverlap <- unique(OVERLAP$pers_id)
+			allpersonswithoverlap
+			length(allpersonswithoverlap)
+			
+			write.xlsx(data.frame(pers_id = allpersonswithoverlap), file = paste0("ALLPERSWITHOVERLAP_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+			
+			# so I can check if the right amount of people got deleted: how many rows do these people all together have in RESE?
+			nrow(RESE[which(RESE$pers_id %in% allpersonswithoverlap),])
+			
+			
+		# alright, I have made a function that merges eppisodes on the basis of pers_ids, lets test it here -- please note that we use RESE as the input here! not OVERLAP
+			# Replace "NL_Agema_Fleur_1976" with the pers_id you want to check.
+			
+			# I want to test and check a couple manually
+				RESE[which(RESE$pers_id == "NL_Agema_Fleur_1976"),]
+				merged_intervals <- merge_episodes(RESE,"NL_Agema_Fleur_1976")
+				merged_intervals # alright, this looks correct.
+			
+				RESE[which(RESE$pers_id == "NL_Voordewind_Joel_1965"),]
+				merged_intervals <- merge_episodes(RESE,"NL_Voordewind_Joel_1965")
+				merged_intervals # alright, this looks correct.
+			
+				RESE[which(RESE$pers_id == "NL_Plasterk_Ronald_1957"),]
+				merged_intervals <- merge_episodes(RESE,"NL_Plasterk_Ronald_1957")
+				merged_intervals # alright, this looks correct.
+				
+				RESE[which(RESE$pers_id == "NL_Boreel_Willem_1800"),]
+				merged_intervals <- merge_episodes(RESE,"NL_Boreel_Willem_1800")
+				merged_intervals # alright, this looks correct.
+				
+		# export the whole shabang
+		
+			# Initialize IMPORT as an empty data frame
+			IMPORT <- NULL
+
+			# Loop over all persons with overlapping episodes and append merged intervals
+			for (pid in allpersonswithoverlap) {
+			  merged_intervals <- merge_episodes(RESE, pid)
+			  if (!is.null(merged_intervals)) {
+				IMPORT <- rbind(IMPORT, merged_intervals)
+			  }
+			}
+			
+			# some checks on import
+			head(IMPORT)
+			nrow(IMPORT)
+			
+			# for the function return_overlap to work we need posixdates in the dataframe
+			IMPORT$res_entry_start_posoxctformat <- as.POSIXct(as.character(IMPORT$res_entry_start),format=c("%d%b%Y"))
+			IMPORT$res_entry_end_posoxctformat <- as.POSIXct(as.character(IMPORT$res_entry_end),format=c("%d%b%Y"))
+			
+			# does it pass the check defined above of no overlapping intervals?
+				return_overlap(IMPORT) # should return zero
+
+				# Remove the POSIXct date columns from IMPORT as they are not needed in the export
+				IMPORT <- IMPORT %>% select(-res_entry_start_posoxctformat, -res_entry_end_posoxctformat)
+
+			# Create a timestamped filename in one line and export to Excel
+			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
+			write.xlsx(IMPORT, file = filename)
+						
