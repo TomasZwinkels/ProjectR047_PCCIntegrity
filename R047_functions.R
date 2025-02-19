@@ -141,3 +141,52 @@ merge_episodes <- function(data, pid) {
   
   return(result_df)
 }
+
+###############################################################################
+# Function: find_gap_episodes
+#
+# Description:
+#   For each person in the provided data frame, this function identifies 
+#   consecutive episodes where there is a gap (in days) that is strictly greater 
+#   than a specified minimum gap (min_gap) and strictly less than a specified 
+#   gap threshold (gap_threshold). It adds a column for the previous episode's 
+#   res_entry_id (previous_res_entry_id) and renames the current episode's 
+#   res_entry_id as current_res_entry_id. Both the previous_end and res_entry_start 
+#   dates are formatted consistently as "%d%b%Y" in lowercase.
+#
+# Inputs:
+#   - data: A data frame that must include at least:
+#         pers_id, res_entry_id, res_entry_start_posoxctformat, and 
+#         res_entry_end_posoxctformat.
+#   - min_gap: A numeric value (default = 1) specifying the minimum gap (in days)
+#         to ignore (i.e. gaps equal to 1 day are not flagged).
+#   - gap_threshold: A numeric value (default = 3) specifying the maximum gap 
+#         (in days) to be flagged.
+#
+# Output:
+#   - A base R data frame with columns: 
+#         pers_id, previous_res_entry_id, current_res_entry_id, previous_end, 
+#         res_entry_start, gap_days.
+###############################################################################
+find_gap_episodes <- function(data, min_gap = 1, gap_threshold = 3) {
+  df <- data %>%
+    group_by(pers_id) %>%
+    arrange(res_entry_start_posoxctformat) %>%
+    mutate(
+      previous_end = lag(res_entry_end_posoxctformat),
+      previous_res_entry_id = lag(res_entry_id),
+      gap_days = as.numeric(difftime(res_entry_start_posoxctformat, previous_end, units = "days"))
+    ) %>%
+    filter(!is.na(gap_days) & gap_days > min_gap & gap_days < gap_threshold) %>%
+    ungroup() %>%
+    mutate(
+      previous_end = tolower(format(previous_end, "%d%b%Y")),
+      res_entry_start = tolower(format(res_entry_start_posoxctformat, "%d%b%Y"))
+    ) %>%
+    select(pers_id, previous_res_entry_id, current_res_entry_id = res_entry_id, previous_end, res_entry_start, gap_days)
+  
+  as.data.frame(df)
+}
+
+
+

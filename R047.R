@@ -237,7 +237,7 @@
 			allpersonswithoverlap
 			length(allpersonswithoverlap)
 			
-			write.xlsx(data.frame(pers_id = allpersonswithoverlap), file = paste0("ALLPERSWITHOVERLAP_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+		#	write.xlsx(data.frame(pers_id = allpersonswithoverlap), file = paste0("ALLPERSWITHOVERLAP_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
 			
 			# so I can check if the right amount of people got deleted: how many rows do these people all together have in RESE?
 			nrow(RESE[which(RESE$pers_id %in% allpersonswithoverlap),])
@@ -292,5 +292,9 @@
 
 			# Create a timestamped filename in one line and export to Excel
 			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
-			write.xlsx(IMPORT, file = filename)
-						
+		#	write.xlsx(IMPORT, file = filename)
+	
+	GAPS <- find_gap_episodes(RESE,1,3)
+	nrow(GAPS)
+	
+	GAPS

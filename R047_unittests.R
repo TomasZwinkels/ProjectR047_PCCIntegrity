@@ -1,3 +1,7 @@
+################################################################################
+# Unit Tests for merge_episodes Function
+################################################################################
+
 library(testthat)
 library(dplyr)
 library(lubridate)
@@ -155,4 +159,36 @@ test_that("merge_episodes merges multiple intervals correctly", {
   # Interval 3: 01feb2020 to 05feb2020
   expect_equal(result$res_entry_start[3], "01feb2020")
   expect_equal(result$res_entry_end[3],   "05feb2020")
+})
+
+test_that("find_gap_episodes identifies episodes with problematic gaps", {
+  # Create sample data for person "test_gap"
+  test_data <- data.frame(
+    pers_id = rep("test_gap", 3),
+    res_entry_id = paste0("test_gap_", 1:3),
+    res_entry_start = c("01jan2020", "07jan2020", "11jan2020"),
+    res_entry_end   = c("05jan2020", "10jan2020", "15jan2020"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add POSIXct columns using day-level resolution
+  test_data$res_entry_start_posoxctformat <- as.POSIXct(test_data$res_entry_start, format="%d%b%Y")
+  test_data$res_entry_end_posoxctformat   <- as.POSIXct(test_data$res_entry_end, format="%d%b%Y")
+  
+  # Call the function with min_gap = 1 and gap_threshold = 3
+  # Expected: 
+  #   - Gap between Episode 1 (ends "05jan2020") and Episode 2 (starts "07jan2020") = 2 days (flagged)
+  #   - Gap between Episode 2 and Episode 3 = 1 day (not flagged, because 1 is not > 1)
+  result <- find_gap_episodes(test_data, min_gap = 1, gap_threshold = 3)
+  
+  # We expect one problematic gap (flagging Episode 2)
+  expect_equal(nrow(result), 1)
+  expect_equal(result$pers_id[1], "test_gap")
+  expect_equal(result$previous_res_entry_id[1], "test_gap_1")
+  expect_equal(result$current_res_entry_id[1], "test_gap_2")
+  expect_equal(result$gap_days[1], 2)
+  
+  # Verify that previous_end and res_entry_start are consistently formatted
+  expect_equal(result$previous_end[1], "05jan2020")
+  expect_equal(result$res_entry_start[1], "07jan2020")
 })
