@@ -294,7 +294,39 @@
 			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
 		#	write.xlsx(IMPORT, file = filename)
 	
-	GAPS <- find_gap_episodes(RESE,1,3)
-	nrow(GAPS)
-	
-	GAPS
+GAPS <- find_gap_episodes(RESE,1,3)
+nrow(GAPS)
+
+# Create a barplot showing the frequency of different gap_days values
+barplot_gaps <- barplot(table(GAPS$gap_days), 
+                        main="Frequency of Gap Days", 
+                        xlab="Gap Days", 
+                        ylab="Frequency",
+                        col="steelblue",
+                        border="white")
+
+# Add count labels on top of each bar
+text(barplot_gaps, table(GAPS$gap_days)/2, labels=table(GAPS$gap_days), pos=3)
+
+# Import a sample of the PCC data to examine structure
+PCC_SAMPLE <- import_pcc_sample(pcc_dir = "PCC", n_rows = 10)
+
+# Import and inspect parliamentary information
+PARL <- read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
+summary(PARL)
+names(PARL)
+
+# Convert PARL dates to POSIXct format for comparison
+PARL$parl_start_date <- as.POSIXct(as.character(PARL$parl_start), format=c("%d%b%Y"))
+PARL$parl_end_date <- as.POSIXct(as.character(PARL$parl_end), format=c("%d%b%Y"))
+
+# Find suspicious dates that are close to parliament dates
+SUSPICIOUS_DATES <- find_suspicious_dates(RESE, PARL, threshold_days = 14)
+
+# Display the suspicious dates for manual inspection
+SUSPICIOUS_DATES
+
+GAPS
+
+
+

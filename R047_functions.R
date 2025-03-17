@@ -62,9 +62,13 @@ merge_episodes <- function(data, pid) {
     current_start <- df$res_entry_start_posoxctformat[i]
     current_end   <- df$res_entry_end_posoxctformat[i]
     
-    # If overlapping or contiguous, extend the current interval
-    if (current_start <= merged_end) {
-      merged_end <- max(merged_end, current_end)
+    # If overlapping or contiguous, extend the current interval (handle NA values)
+    # For nested intervals, we need to check if the current episode is completely within the merged interval
+    if (!is.na(current_start) && !is.na(merged_end) && 
+        (current_start <= merged_end || 
+         (current_start <= merged_start && current_end >= merged_start) || 
+         (current_start >= merged_start && current_end <= merged_end))) {
+      merged_end <- max(merged_end, current_end, na.rm = TRUE)
     } else {
       # Finalize the current interval and assign a label:
       # If no interval has been finalized yet, this is the first interval;
@@ -175,7 +179,7 @@ find_gap_episodes <- function(data, min_gap = 1, gap_threshold = 3) {
     mutate(
       previous_end = lag(res_entry_end_posoxctformat),
       previous_res_entry_id = lag(res_entry_id),
-      gap_days = as.numeric(difftime(res_entry_start_posoxctformat, previous_end, units = "days"))
+      gap_days = round(as.numeric(difftime(res_entry_start_posoxctformat, previous_end, units = "days")), 0)
     ) %>%
     filter(!is.na(gap_days) & gap_days > min_gap & gap_days < gap_threshold) %>%
     ungroup() %>%
@@ -189,4 +193,191 @@ find_gap_episodes <- function(data, min_gap = 1, gap_threshold = 3) {
 }
 
 
+###############################################################################
+# Function: import_pcc_sample
+#
+# Description:
+#   Imports the first n rows of all CSV files in the specified PCC directory.
+#   This function is useful for examining the structure of the files without
+#   loading all the data, which can be resource-intensive.
+#
+# Inputs:
+#   - pcc_dir: A character string specifying the directory containing PCC CSV files
+#              (default = "PCC")
+#   - n_rows: A numeric value specifying the number of rows to import from each file
+#             (default = 10)
+#   - sep: A character specifying the separator used in the CSV files
+#          (default = ";")
+#
+# Output:
+#   - A named list of data frames, where each data frame contains the first n rows
+#     of a CSV file, and the name of each element is the filename without extension.
+###############################################################################
+import_pcc_sample <- function(pcc_dir = "PCC", n_rows = 10, sep = ";") {
+  # Get list of CSV files in the PCC directory
+  csv_files <- list.files(path = pcc_dir, pattern = "\\.csv$", full.names = TRUE)
+  
+  if (length(csv_files) == 0) {
+    warning("No CSV files found in directory: ", pcc_dir)
+    return(NULL)
+  }
+  
+  # Initialize empty list to store dataframes
+  PCC_DATA <- list()
+  
+  # Import first n rows of each CSV file
+  for (file_path in csv_files) {
+    # Extract filename without extension to use as list name
+    file_name <- tools::file_path_sans_ext(basename(file_path))
+    
+    # Read first n rows of the CSV file
+    DF <- read.csv(file_path, header = TRUE, sep = sep, nrows = n_rows)
+    
+    # Add dataframe to list with filename as name
+    PCC_DATA[[file_name]] <- DF
+    
+    # Print message about imported file
+    message("Imported ", n_rows, " rows from ", file_path)
+  }
+  
+  return(PCC_DATA)
+}
+
+###############################################################################
+# Function: find_suspicious_start_dates
+#
+# Description:
+#   Identifies RESE entries with suspicious start dates compared to the 
+#   parliament dates in the PARL data frame. A start date is flagged as 
+#   suspicious if the absolute difference between the RESE start date and the 
+#   closest parliament start date (leg_period_start_posoxctformat) is greater than 
+#   zero and less than or equal to threshold_days.
+#
+# Inputs:
+#   - RESE: A data frame containing resume entries with at least:
+#         pers_id, res_entry_id, res_entry_start_posoxctformat, res_entry_end_posoxctformat
+#   - PARL: A data frame containing parliament data with at least:
+#         leg_period_start_posoxctformat, leg_period_end_posoxctformat, (and optionally parl_id)
+#   - threshold_days: A numeric value specifying the maximum number of days
+#         difference to consider suspicious (default = 14)
+#
+# Output:
+#   - A data frame containing entries with suspicious start dates with columns:
+#         pers_id, res_entry_id, res_entry_start, res_entry_end,
+#         closest_parl_start, closest_parl_end, start_diff_days, parl_id
+###############################################################################
+find_suspicious_start_dates <- function(RESE, PARL, threshold_days = 14) {
+  suspicious_entries <- list()
+  
+  # Process each RESE entry (checking start dates)
+  for (i in 1:nrow(RESE)) {
+    entry <- RESE[i, ]
+    
+    # Skip if start date is missing
+    if (is.na(entry$res_entry_start_posoxctformat)) {
+      next
+    }
+    
+    # Compute absolute differences (in days) for the start date
+    start_diffs <- abs(as.numeric(difftime(entry$res_entry_start_posoxctformat,
+                                             PARL$leg_period_start_posoxctformat,
+                                             units = "days")))
+    start_diffs <- round(start_diffs, 0)
+    
+    closest_start_idx <- which.min(start_diffs)
+    min_start_diff <- start_diffs[closest_start_idx]
+    
+    # If the start date is suspicious, record it
+    if (min_start_diff > 0 && min_start_diff <= threshold_days) {
+      suspicious_entries[[length(suspicious_entries) + 1]] <- data.frame(
+        pers_id = entry$pers_id,
+        res_entry_id = entry$res_entry_id,
+        res_entry_start = tolower(format(entry$res_entry_start_posoxctformat, "%d%b%Y")),
+        res_entry_end = tolower(format(entry$res_entry_end_posoxctformat, "%d%b%Y")),
+        closest_parl_start = tolower(format(PARL$leg_period_start_posoxctformat[closest_start_idx], "%d%b%Y")),
+        closest_parl_end = tolower(format(PARL$leg_period_end_posoxctformat[closest_start_idx], "%d%b%Y")),
+        start_diff_days = min_start_diff,
+        parl_id = if("parl_id" %in% names(PARL)) PARL$parl_id[closest_start_idx] else NA,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  if (length(suspicious_entries) == 0) {
+    message("No suspicious start dates found within threshold of ", threshold_days, " days.")
+    return(NULL)
+  }
+  
+  result_df <- do.call(rbind, suspicious_entries)
+  return(result_df)
+}
+
+###############################################################################
+# Function: find_suspicious_end_dates
+#
+# Description:
+#   Identifies RESE entries with suspicious end dates compared to the 
+#   parliament dates in the PARL data frame. An end date is flagged as 
+#   suspicious if the absolute difference between the RESE end date and the 
+#   closest parliament end date (leg_period_end_posoxctformat) is greater than 
+#   zero and less than or equal to threshold_days.
+#
+# Inputs:
+#   - RESE: A data frame containing resume entries with at least:
+#         pers_id, res_entry_id, res_entry_start_posoxctformat, res_entry_end_posoxctformat
+#   - PARL: A data frame containing parliament data with at least:
+#         leg_period_start_posoxctformat, leg_period_end_posoxctformat, (and optionally parl_id)
+#   - threshold_days: A numeric value specifying the maximum number of days
+#         difference to consider suspicious (default = 14)
+#
+# Output:
+#   - A data frame containing entries with suspicious end dates with columns:
+#         pers_id, res_entry_id, res_entry_start, res_entry_end,
+#         closest_parl_start, closest_parl_end, end_diff_days, parl_id
+###############################################################################
+find_suspicious_end_dates <- function(RESE, PARL, threshold_days = 14) {
+  suspicious_entries <- list()
+  
+  # Process each RESE entry (checking end dates)
+  for (i in 1:nrow(RESE)) {
+    entry <- RESE[i, ]
+    
+    # Skip if end date is missing
+    if (is.na(entry$res_entry_end_posoxctformat)) {
+      next
+    }
+    
+    # Compute absolute differences (in days) for the end date
+    end_diffs <- abs(as.numeric(difftime(entry$res_entry_end_posoxctformat,
+                                           PARL$leg_period_end_posoxctformat,
+                                           units = "days")))
+    end_diffs <- round(end_diffs, 0)
+    
+    closest_end_idx <- which.min(end_diffs)
+    min_end_diff <- end_diffs[closest_end_idx]
+    
+    # If the end date is suspicious, record it
+    if (min_end_diff > 0 && min_end_diff <= threshold_days) {
+      suspicious_entries[[length(suspicious_entries) + 1]] <- data.frame(
+        pers_id = entry$pers_id,
+        res_entry_id = entry$res_entry_id,
+        res_entry_start = tolower(format(entry$res_entry_start_posoxctformat, "%d%b%Y")),
+        res_entry_end = tolower(format(entry$res_entry_end_posoxctformat, "%d%b%Y")),
+        closest_parl_start = tolower(format(PARL$leg_period_start_posoxctformat[closest_end_idx], "%d%b%Y")),
+        closest_parl_end = tolower(format(PARL$leg_period_end_posoxctformat[closest_end_idx], "%d%b%Y")),
+        end_diff_days = min_end_diff,
+        parl_id = if("parl_id" %in% names(PARL)) PARL$parl_id[closest_end_idx] else NA,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  if (length(suspicious_entries) == 0) {
+    message("No suspicious end dates found within threshold of ", threshold_days, " days.")
+    return(NULL)
+  }
+  
+  result_df <- do.call(rbind, suspicious_entries)
+  return(result_df)
+}
 

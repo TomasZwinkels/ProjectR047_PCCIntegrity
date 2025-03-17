@@ -2,9 +2,13 @@
 # Unit Tests for merge_episodes Function
 ################################################################################
 
+# Load required libraries
 library(testthat)
 library(dplyr)
 library(lubridate)
+
+# Source the functions file to make all functions available for testing
+source("R047_functions.R")
 
 # Test 1: Overlapping and contiguous intervals
 test_that("merge_episodes merges overlapping/contiguous intervals correctly", {
@@ -161,6 +165,11 @@ test_that("merge_episodes merges multiple intervals correctly", {
   expect_equal(result$res_entry_end[3],   "05feb2020")
 })
 
+
+################################################################################
+# Unit Tests for find_gap_episodes Function
+################################################################################
+
 test_that("find_gap_episodes identifies episodes with problematic gaps", {
   # Create sample data for person "test_gap"
   test_data <- data.frame(
@@ -191,4 +200,93 @@ test_that("find_gap_episodes identifies episodes with problematic gaps", {
   # Verify that previous_end and res_entry_start are consistently formatted
   expect_equal(result$previous_end[1], "05jan2020")
   expect_equal(result$res_entry_start[1], "07jan2020")
+})
+
+################################################################################
+# Unit Tests for find_suspicious_start_dates and find_suspicious_end_dates
+################################################################################
+
+library(testthat)
+library(dplyr)
+
+test_that("find_suspicious_start_dates works as expected", {
+  # Create sample PARL data (assumed to contain only NL data)
+  PARL <- data.frame(
+    parl_id = c("parl1", "parl2"),
+    leg_period_start_posoxctformat = as.POSIXct(c("01Jan2020", "15Jan2020"), format = "%d%b%Y"),
+    leg_period_end_posoxctformat   = as.POSIXct(c("31Jan2020", "15Feb2020"), format = "%d%b%Y"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Create sample RESE data with various start dates.
+  RESE <- data.frame(
+    pers_id = c("p1", "p2", "p3", "p4"),
+    res_entry_id = c("r1", "r2", "r3", "r4"),
+    res_entry_start_posoxctformat = as.POSIXct(c("03Jan2020", "01Jan2020", "14Jan2020", "20Feb2020"), 
+                                                format = "%d%b%Y"),
+    res_entry_end_posoxctformat   = as.POSIXct(c("28Jan2020", "31Jan2020", "28Jan2020", "20Mar2020"), 
+                                                format = "%d%b%Y"),
+    stringsAsFactors = FALSE
+  )
+  
+  # p1: diff = |03Jan2020 - 01Jan2020| = 2 days (suspicious)
+  # p2: diff = |01Jan2020 - 01Jan2020| = 0 days (not suspicious)
+  # p3: diff = min(|14Jan2020 - 01Jan2020| = 13, |14Jan2020 - 15Jan2020| = 1) => 1 day (suspicious)
+  # p4: diff = min(|20Feb2020 - 01Jan2020| = 50, |20Feb2020 - 15Jan2020| = 36) => 36 days (outside threshold)
+  
+  result <- find_suspicious_start_dates(RESE, PARL, threshold_days = 14)
+  
+  # We expect entries for p1 and p3 only.
+  expect_equal(nrow(result), 2)
+  expect_true("p1" %in% result$pers_id)
+  expect_true("p3" %in% result$pers_id)
+  expect_false("p4" %in% result$pers_id)
+  
+  # Verify the computed differences:
+  p1_row <- result[result$pers_id == "p1", ]
+  expect_equal(p1_row$start_diff_days, 2)
+  
+  p3_row <- result[result$pers_id == "p3", ]
+  expect_equal(p3_row$start_diff_days, 1)
+})
+
+test_that("find_suspicious_end_dates works as expected", {
+  # Create sample PARL data (assumed to contain only NL data)
+  PARL <- data.frame(
+    parl_id = c("parl1", "parl2"),
+    leg_period_start_posoxctformat = as.POSIXct(c("01Jan2020", "15Jan2020"), format = "%d%b%Y"),
+    leg_period_end_posoxctformat   = as.POSIXct(c("31Jan2020", "15Feb2020"), format = "%d%b%Y"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Create sample RESE data with various end dates.
+  RESE <- data.frame(
+    pers_id = c("p1", "p2", "p3", "p4"),
+    res_entry_id = c("r1", "r2", "r3", "r4"),
+    res_entry_start_posoxctformat = as.POSIXct(c("03Jan2020", "01Jan2020", "14Jan2020", "20Feb2020"), 
+                                                format = "%d%b%Y"),
+    res_entry_end_posoxctformat   = as.POSIXct(c("29Jan2020", "31Jan2020", "16Feb2020", "20Mar2020"), 
+                                                format = "%d%b%Y"),
+    stringsAsFactors = FALSE
+  )
+  
+  # p1: end diff = |29Jan2020 - 31Jan2020| = 2 days (suspicious)
+  # p2: end diff = |31Jan2020 - 31Jan2020| = 0 days (not suspicious)
+  # p3: end diff = min(|16Feb2020 - 31Jan2020| = 16, |16Feb2020 - 15Feb2020| = 1) => 1 day (suspicious)
+  # p4: end diff = min(|20Mar2020 - 31Jan2020| = 49, |20Mar2020 - 15Feb2020| = 33) => 33 days (outside threshold)
+  
+  result <- find_suspicious_end_dates(RESE, PARL, threshold_days = 14)
+  
+  # We expect entries for p1 and p3 only.
+  expect_equal(nrow(result), 2)
+  expect_true("p1" %in% result$pers_id)
+  expect_true("p3" %in% result$pers_id)
+  expect_false("p4" %in% result$pers_id)
+  
+  # Verify the computed differences:
+  p1_row <- result[result$pers_id == "p1", ]
+  expect_equal(p1_row$end_diff_days, 2)
+  
+  p3_row <- result[result$pers_id == "p3", ]
+  expect_equal(p3_row$end_diff_days, 1)
 })
