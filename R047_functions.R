@@ -335,7 +335,8 @@ find_suspicious_start_dates <- function(RESE, PARL, threshold_days = 14) {
 #         pers_id, res_entry_id, res_entry_start, res_entry_end,
 #         closest_parl_start, closest_parl_end, end_diff_days, parl_id
 ###############################################################################
-find_suspicious_end_dates <- function(RESE, PARL, threshold_days = 14) {
+find_suspicious_end_dates <- function(RESE, PARL, threshold_days = 14) 
+{
   suspicious_entries <- list()
   
   # Process each RESE entry (checking end dates)
@@ -380,4 +381,3 @@ find_suspicious_end_dates <- function(RESE, PARL, threshold_days = 14) {
   result_df <- do.call(rbind, suspicious_entries)
   return(result_df)
 }
-

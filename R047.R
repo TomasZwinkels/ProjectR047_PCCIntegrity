@@ -53,7 +53,12 @@
 				# import and inspect all the resume entries
 				RESE = read.csv("PCC/RESE.csv", header = TRUE, sep = ";")
 				summary(RESE)
-				names(RESE)					
+				names(RESE)	
+
+				# import and inspect parliamentary information
+				PARL = read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
+				summary(PARL)
+				names(PARL)
 			
 			# not core at the moment
 			
@@ -83,11 +88,6 @@
 				# summary(MEME)
 				# names(MEME)
 				
-				# import and inspect parliamentary information
-				# PARL = read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
-				# summary(PARL)
-				# names(PARL)
-				
 				# import and inspect election level information
 				# ELEC = read.csv("PCC/ELEC.csv", header = TRUE, sep = ";")
 				# summary(ELEC)
@@ -102,31 +102,52 @@
 				# QUOT = read.csv("PCC/QUOT.csv", header = TRUE, sep = ";")
 				# summary(QUOT)
 				# names(QUOT)
-				
-				
-## set active filters that define what data to focus on cleaning
+		
+## bunch of date cleaning e.t.c.
+
+
+
+	# RESE
+		names(RESE)
 	
-	# parliamentary episodes in the Netherlands
-	nrow(RESE)
-	RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]	
-	nrow(RESE)		
+		# for now, we focus on RESE episodes in the Netherlands
+			nrow(RESE)
+			RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]	
+			nrow(RESE)		
+	
+		# pre-process and check all RESE dates
+			source("R047_RESE_functions.R")	
+			
+			# pre-proces
+			RESE <- preprocess_RESEdates(RESE)
 
+			# no NA
+			check_anyNAinRESEdates(RESE) # should return FALSE
+			
+	# PARL
+		names(PARL)
+		
+		# for now, we focus on PARL episodes in the Netherlands
+			nrow(PARL)
+			PARL <- PARL[which(PARL$country_abb == "NL"),]	
+			nrow(PARL)	
+		
+		# pre-process and check all RESE dates
+			source("R047_PARL_functions.R")	
+			
+			# pre-proces
+			PARL <- preprocess_PARLdates(PARL)
 
+			# no NA
+			check_anyNAinPARLdates(PARL) # should return FALSE
+		
+	
 ##### Politician Level #####
 
-#### check correct formatting of all the dates
+#### check correct formatting of all the RESE dates
 
-			names(RESE)
-			
-		# the start dates
-		
-			# first do the standard cleaning by getting rid off left and right censored dates
-					RESE$res_entry_start <- gsub("[[rcen]]","",RESE$res_entry_start,fixed=TRUE)
-					RESE$res_entry_start <- gsub("[[lcen]]","",RESE$res_entry_start,fixed=TRUE)
-					RESE$res_entry_end <- gsub("[[rcen]]","",RESE$res_entry_end,fixed=TRUE)
-					RESE$res_entry_end <- gsub("[[lcen]]","",RESE$res_entry_end,fixed=TRUE)
-		
-		# how many cases with none typical length 
+	## RESE
+	# how many cases with none typical length 
 			# length is 9 for all complete entries
 			# length is 4 for all only year entries
 			
@@ -135,22 +156,40 @@
 				
 			# inspect some of the less usual cases
 				RESE[which(nchar(RESE$res_entry_end) == 7),] # so for NL, these are mainly a bunch of cases that have aug2012 as their enddate
-		
-		# transform to R date and check if all the dates make sense
-		
-			# transform
-			RESE$res_entry_start_posoxctformat <- as.POSIXct(as.character(RESE$res_entry_start),format=c("%d%b%Y"))
-			RESE$res_entry_end_posoxctformat <- as.POSIXct(as.character(RESE$res_entry_end),format=c("%d%b%Y"))
-
+				
 			# check the result
-			table(is.na(RESE$res_entry_start_posoxctformat)) # should return all FALSE
-			table(is.na(RESE$res_entry_end_posoxctformat)) # should return all FALSE
+				table(is.na(RESE$res_entry_start_posoxctformat)) # should return all FALSE
+				table(is.na(RESE$res_entry_end_posoxctformat)) # should return all FALSE
 
-		# are all the end dates after the start dates
-		
-			table(RESE$res_entry_start_posoxctformat < RESE$res_entry_end_posoxctformat)
+			# are all the end dates after the start dates
+				table(RESE$res_entry_start_posoxctformat < RESE$res_entry_end_posoxctformat)
 
 #### check  for overlapping membership episodes for the same person
+	
+	# check, are there any fully overlapping dates?
+	
+		check_RESE_fulloverlap <- function(RESE)
+		{
+		
+		FDUBS <- RESE[
+					duplicated(RESE[, c("pers_id",
+									  "res_entry_start_posoxctformat",
+									  "res_entry_end_posoxctformat")]) |
+					duplicated(RESE[, c("pers_id",
+										"res_entry_start_posoxctformat",
+										"res_entry_end_posoxctformat")],
+							   fromLast = TRUE),
+				]
+		
+		
+		
+		if(nrow(FDUBS) == 0 ) {check_RESE_fulloverlap = TRUE} 
+		
+		else {check_RESE_fulloverlap = FALSE}
+		
+		}
+
+
 
 	# full overlap: exact same start and end dates
 		FDUBS <- RESE[
@@ -168,7 +207,6 @@
 		# show for inspection and so cases can be fixed.
 		FDUBS[,c("res_entry_id","pers_id","res_entry_start","","res_entry_end","res_entry_raw")]
 	
-		
 	# almost the exact same start AND OR endate (say 2 day different)
 	
 		# focus on core variables
@@ -293,40 +331,23 @@
 			# Create a timestamped filename in one line and export to Excel
 			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
 		#	write.xlsx(IMPORT, file = filename)
-	
+
+#################################### GAP DETECTION: EPPISODES THAT ARE VERY CLOSE TOGETHER ##################################
+
 GAPS <- find_gap_episodes(RESE,1,3)
 nrow(GAPS)
 
-# Create a barplot showing the frequency of different gap_days values
-barplot_gaps <- barplot(table(GAPS$gap_days), 
-                        main="Frequency of Gap Days", 
-                        xlab="Gap Days", 
-                        ylab="Frequency",
-                        col="steelblue",
-                        border="white")
-
-# Add count labels on top of each bar
-text(barplot_gaps, table(GAPS$gap_days)/2, labels=table(GAPS$gap_days), pos=3)
-
-# Import a sample of the PCC data to examine structure
-PCC_SAMPLE <- import_pcc_sample(pcc_dir = "PCC", n_rows = 10)
-
-# Import and inspect parliamentary information
-PARL <- read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
-summary(PARL)
-names(PARL)
-
-# Convert PARL dates to POSIXct format for comparison
-PARL$parl_start_date <- as.POSIXct(as.character(PARL$parl_start), format=c("%d%b%Y"))
-PARL$parl_end_date <- as.POSIXct(as.character(PARL$parl_end), format=c("%d%b%Y"))
-
-# Find suspicious dates that are close to parliament dates
-SUSPICIOUS_DATES <- find_suspicious_dates(RESE, PARL, threshold_days = 14)
-
-# Display the suspicious dates for manual inspection
-SUSPICIOUS_DATES
-
 GAPS
 
+#################################### SUSPICIOUS DATES ##################################
 
+# Run the two suspicious dates functions (for start and end dates)
+SUSPICIOUS_START_DATES <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
+SUSPICIOUS_START_DATES
 
+SUSPICIOUS_END_DATES   <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
+SUSPICIOUS_END_DATES
+
+# (Optional: Export results to Excel)
+# write.xlsx(SUSPICIOUS_START_DATES, file = paste0("Suspicious_Start_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+# write.xlsx(SUSPICIOUS_END_DATES, file = paste0("Suspicious_End_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
