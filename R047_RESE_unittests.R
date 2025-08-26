@@ -41,7 +41,7 @@ mk_rese_overlap <- function(political_function, pers_id, start_dates, end_dates)
 }
 
 # ==================================================================
-# New block: tests for referential integrity RESE -> POLI
+# Block: tests for referential integrity RESE -> POLI
 #   Function under test: check_RESE_persid_in_POLI()
 # ==================================================================
 
@@ -76,6 +76,43 @@ test_that("errors when pers_id column is missing in either RESE or POLI", {
   POLI <- data.frame(id = 1:3)
   expect_error(check_RESE_persid_in_POLI(RESE, POLI))
 })
+
+# ==================================================================
+# Block: check_RESE_resentryid_unique()
+# ==================================================================
+
+# ------------------------------------------------------------------
+# Additional tests for: check_RESE_resentryid_unique()
+# ------------------------------------------------------------------
+
+test_that("returns TRUE when all res_entry_id are unique", {
+  RESE <- data.frame(res_entry_id = 101:105, stringsAsFactors = FALSE)
+  expect_true(check_RESE_resentryid_unique(RESE))
+})
+
+test_that("returns FALSE when there is any duplicate res_entry_id", {
+  RESE <- data.frame(res_entry_id = c(101, 102, 103, 102), stringsAsFactors = FALSE)
+  expect_false(check_RESE_resentryid_unique(RESE))
+})
+
+test_that("single NA is OK (still unique), two NA are not", {
+  RESE1 <- data.frame(res_entry_id = c(101, NA, 103), stringsAsFactors = FALSE)
+  RESE2 <- data.frame(res_entry_id = c(101, NA, 103, NA), stringsAsFactors = FALSE)
+  expect_true(check_RESE_resentryid_unique(RESE1))   # only one NA -> unique
+  expect_false(check_RESE_resentryid_unique(RESE2))  # two NA -> duplicate NA
+})
+
+test_that("empty RESE returns TRUE", {
+  RESE <- data.frame(res_entry_id = integer(0))
+  expect_true(check_RESE_resentryid_unique(RESE))
+})
+
+test_that("errors when res_entry_id column is missing", {
+  RESE <- data.frame(id = 1:3)
+  expect_error(check_RESE_resentryid_unique(RESE))
+})
+
+
 
 # ==================================================================
 # Core block: preprocess_RESEdates() and check_anyNAinRESEdates()

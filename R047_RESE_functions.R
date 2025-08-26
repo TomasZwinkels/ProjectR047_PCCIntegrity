@@ -1,4 +1,47 @@
 ###############################################################################
+# Function: check_RESE_persid_in_POLI
+# Description:
+#   Check whether all pers_id values in the RESE data.frame
+#   also occur in the POLI data.frame.
+#
+# Inputs:
+#   - RESE: data.frame with column pers_id
+#   - POLI: data.frame with column pers_id
+#
+# Returns:
+#   - TRUE  if all RESE$pers_id are present in POLI$pers_id
+#   - FALSE if one or more RESE$pers_id are missing from POLI
+###############################################################################
+check_RESE_persid_in_POLI <- function(RESE, POLI) {
+  # sanity: required cols
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+
+  missing_ids <- setdiff(unique(RESE$pers_id), unique(POLI$pers_id))
+  length(missing_ids) == 0
+}
+
+###############################################################################
+# Function: check_RESE_resentryid_unique
+# Description:
+#   Check whether all res_entry_id values in RESE are unique.
+#
+# Inputs:
+#   - RESE: data.frame with column res_entry_id
+#
+# Returns:
+#   - TRUE  if no duplicates (including NA duplicates) are present
+#   - FALSE if one or more duplicates exist
+###############################################################################
+check_RESE_resentryid_unique <- function(RESE) {
+  if (!"res_entry_id" %in% names(RESE)) {
+    stop("RESE is missing column res_entry_id")
+  }
+  !any(duplicated(RESE$res_entry_id))
+}
+
+
+###############################################################################
 # Function: preprocess_RESEdates
 # Description:
 #   Turn RESE dates (PCC format like "01Jan2020", possibly with [[lcen]]/[[rcen]])
@@ -51,6 +94,27 @@ preprocess_RESEdates <- function(RESELOC) {
 
   RESELOC
 }
+
+###############################################################################
+# Function: check_anyNAinRESEdates
+# Description:
+#   Returns TRUE if there are any NAs in either parsed RESE date column.
+#
+# Inputs:
+#   - RESELOC: data.frame with
+#       res_entry_start_posoxctformat (POSIXct)
+#       res_entry_end_posoxctformat   (POSIXct)
+#
+# Returns:
+#   - TRUE  if there are any NA values in start or end columns
+#   - FALSE if all values are non-missing
+###############################################################################
+check_anyNAinRESEdates <- function(RESELOC) {
+  anystartdatesmissing <- sum(is.na(RESELOC$res_entry_start_posoxctformat)) > 0
+  anyenddatesmissing   <- sum(is.na(RESELOC$res_entry_end_posoxctformat))   > 0
+  anystartdatesmissing || anyenddatesmissing
+}
+
 
 ###############################################################################
 # Function: check_RESE_parlmemeppisodes_anyfulloverlap

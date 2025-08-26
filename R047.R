@@ -114,15 +114,28 @@
 			RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]	
 			nrow(RESE)		
 	
-		# pre-process and check all RESE dates
+		# pre-process and check RESE 
 			source("R047_RESE_functions.R")	
 			test_file("R047_RESE_unittests.R")
 			
 			# pre-proces
 			RESE <- preprocess_RESEdates(RESE)
 
-			# no NA
+			# no NA in dates
 			check_anyNAinRESEdates(RESE) # should return FALSE
+			
+			# do all pers_ids occur?
+			check_RESE_persid_in_POLI(RESE,POLI)
+			
+				# inspect!
+				RESE$pers_id[which(! RESE$pers_id %in% POLI$pers_id)]
+				
+			# are all the res_entry_ids unique?
+			
+				check_RESE_resentryid_unique(RESE)
+				
+				# inspect
+				unique(RESE$res_entry_id[duplicated(RESE$res_entry_id)])
 			
 	# PARL
 		names(PARL)
@@ -205,7 +218,7 @@
 		source("R047_RESE_functions.R")	
 		test_file("R047_RESE_unittests.R")
 		
-		check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
+		check_RESE_anynear_fulloverlap(RESE)
 	
 	# see comment above, also here some code is 'repeated' so this is the 'script version' of the function above
 	# so we can do inspections!
@@ -237,7 +250,7 @@
 								 units = "days")) <= 2
 				  )
 			
-			nrow(AFDUBS) # alright, also all fixed now
+			nrow(AFDUBS) 
 			head(AFDUBS)
 		
 		# show for inspection and so cases can be fixed. # only one case left now: was already fixed in the excel file
@@ -332,7 +345,7 @@
 			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
 		#	write.xlsx(IMPORT, file = filename)
 
-#################################### GAP DETECTION: EPPISODES THAT ARE VERY CLOSE TOGETHER ##################################
+#################################### GAP DETECTION: EPISODES THAT ARE VERY CLOSE TOGETHER ##################################
 
 GAPS <- find_gap_episodes(RESE,1,3)
 nrow(GAPS)
@@ -340,6 +353,8 @@ nrow(GAPS)
 GAPS
 
 #################################### SUSPICIOUS DATES ##################################
+
+# Alright, so these are for sure not things that are a hard check.
 
 # Run the two suspicious dates functions (for start and end dates)
 SUSPICIOUS_START_DATES <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
