@@ -1,17 +1,15 @@
 ###############################################################################
-# Function: preprocess_RESEdates
+# Function: preprocess_PARLdates
 # Description:
-#   Turn RESE dates (PCC format like "01Jan2020", possibly with [[lcen]]/[[rcen]])
-#   into POSIXct columns *_posoxctformat. Warn if any dates fail to parse.
+#   Clean [[lcen]]/[[rcen]] tags on leg_period_* and parse to POSIXct.
 # Input:
-#   - RESELOC: data.frame with res_entry_start / res_entry_end (character)
+#   - PARLLOC: data.frame with leg_period_start / leg_period_end (character)
 # Output:
-#   - RESELOC with res_entry_start_posoxctformat / res_entry_end_posoxctformat
+#   - PARLLOC with leg_period_start_posoxctformat / leg_period_end_posoxctformat
 ###############################################################################
+preprocess_PARLdates <- function(PARLLOC) {
 
-preprocess_RESEdates <- function(RESELOC) {
-
-  # remember locale, switch to a safe one for %b month parsing, restore on exit
+  # remember locale, switch to safe one for %b month parsing, restore on exit
   old_lc_time <- Sys.getlocale("LC_TIME")
   on.exit(try(Sys.setlocale("LC_TIME", old_lc_time), silent = TRUE), add = TRUE)
   suppressWarnings({
@@ -19,45 +17,38 @@ preprocess_RESEdates <- function(RESELOC) {
     if (is.na(ok)) Sys.setlocale("LC_TIME", "English")
   })
 
-  # strip censor tags and normalize empties to NA
-  strip_tags <- function(x) {
-    x <- gsub("[[rcen]]", "", x, fixed = TRUE)
-    x <- gsub("[[lcen]]", "", x, fixed = TRUE)
-    x <- trimws(x)
-    x[x == ""] <- NA_character_
-    x
-  }
+  # do the standard cleaning by getting rid of left/right censor tags
+  PARLLOC$leg_period_start <- gsub("[[rcen]]","",PARLLOC$leg_period_start,fixed=TRUE)
+  PARLLOC$leg_period_start <- gsub("[[lcen]]","",PARLLOC$leg_period_start,fixed=TRUE)
+  PARLLOC$leg_period_end   <- gsub("[[rcen]]","",PARLLOC$leg_period_end,fixed=TRUE)
+  PARLLOC$leg_period_end   <- gsub("[[lcen]]","",PARLLOC$leg_period_end,fixed=TRUE)
 
-  RESELOC$res_entry_start <- strip_tags(RESELOC$res_entry_start)
-  RESELOC$res_entry_end   <- strip_tags(RESELOC$res_entry_end)
-
-  # parse to POSIXct (PCC uses like 01Jan2020)
-  RESELOC$res_entry_start_posoxctformat <-
-    as.POSIXct(as.character(RESELOC$res_entry_start), format = "%d%b%Y", tz = "UTC")
-  RESELOC$res_entry_end_posoxctformat   <-
-    as.POSIXct(as.character(RESELOC$res_entry_end),   format = "%d%b%Y", tz = "UTC")
+  # transform to R date
+  PARLLOC$leg_period_start_posoxctformat <-
+    as.POSIXct(as.character(PARLLOC$leg_period_start), format="%d%b%Y", tz="UTC")
+  PARLLOC$leg_period_end_posoxctformat   <-
+    as.POSIXct(as.character(PARLLOC$leg_period_end),   format="%d%b%Y", tz="UTC")
 
   # quick warning if any parse failed
-  anystartdatesmissing <- sum(is.na(RESELOC$res_entry_start_posoxctformat)) > 0
-  anyenddatesmissing   <- sum(is.na(RESELOC$res_entry_end_posoxctformat))   > 0
-
-  if (anystartdatesmissing || anyenddatesmissing) {
+  any_start_na <- sum(is.na(PARLLOC$leg_period_start_posoxctformat)) > 0
+  any_end_na   <- sum(is.na(PARLLOC$leg_period_end_posoxctformat))   > 0
+  if (any_start_na || any_end_na) {
     message(
-      "WARNING: not all dates could be converted successfully. ",
-      "Missing start: ", sum(is.na(RESELOC$res_entry_start_posoxctformat)),
-      " | Missing end: ", sum(is.na(RESELOC$res_entry_end_posoxctformat))
+      "WARNING: not all PARL dates parsed. ",
+      "Missing start: ", sum(is.na(PARLLOC$leg_period_start_posoxctformat)),
+      " | Missing end: ", sum(is.na(PARLLOC$leg_period_end_posoxctformat))
     )
   }
 
-  RESELOC
+  PARLLOC
 }
 
 ###############################################################################
-# Function: check_anyNAinRESEdates
-# Returns TRUE if there are any NAs in either parsed date column.
+# Function: check_anyNAinPARLdates
+# Returns TRUE if there are any NAs in either parsed PARL date column.
 ###############################################################################
-check_anyNAinRESEdates <- function(RESELOC) {
-  anystartdatesmissing <- sum(is.na(RESELOC$res_entry_start_posoxctformat)) > 0
-  anyenddatesmissing   <- sum(is.na(RESELOC$res_entry_end_posoxctformat))   > 0
-  anystartdatesmissing || anyenddatesmissing
+check_anyNAinPARLdates <- function(PARLLOC) {
+  any_start_na <- sum(is.na(PARLLOC$leg_period_start_posoxctformat)) > 0
+  any_end_na   <- sum(is.na(PARLLOC$leg_period_end_posoxctformat))   > 0
+  any_start_na || any_end_na
 }

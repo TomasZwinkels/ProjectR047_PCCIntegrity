@@ -104,8 +104,7 @@
 				# names(QUOT)
 		
 ## bunch of date cleaning e.t.c.
-
-
+# call functions that do this, the idea is that we can run all the tests here easily in other scripts. 
 
 	# RESE
 		names(RESE)
@@ -117,6 +116,7 @@
 	
 		# pre-process and check all RESE dates
 			source("R047_RESE_functions.R")	
+			test_file("R047_RESE_unittests.R")
 			
 			# pre-proces
 			RESE <- preprocess_RESEdates(RESE)
@@ -134,6 +134,7 @@
 		
 		# pre-process and check all RESE dates
 			source("R047_PARL_functions.R")	
+			test_file("R047_PARL_unittests.R")
 			
 			# pre-proces
 			PARL <- preprocess_PARLdates(PARL)
@@ -168,30 +169,19 @@
 	
 	# check, are there any fully overlapping dates?
 	
-		check_RESE_fulloverlap <- function(RESE)
-		{
+		# load and check the functions again
+		source("R047_RESE_functions.R")	
+		test_file("R047_RESE_unittests.R")
 		
-		FDUBS <- RESE[
-					duplicated(RESE[, c("pers_id",
-									  "res_entry_start_posoxctformat",
-									  "res_entry_end_posoxctformat")]) |
-					duplicated(RESE[, c("pers_id",
-										"res_entry_start_posoxctformat",
-										"res_entry_end_posoxctformat")],
-							   fromLast = TRUE),
-				]
-		
-		
-		
-		if(nrow(FDUBS) == 0 ) {check_RESE_fulloverlap = TRUE} 
-		
-		else {check_RESE_fulloverlap = FALSE}
-		
-		}
-
-
-
+		check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
+	
 	# full overlap: exact same start and end dates
+	# note that this is roughly the same code as in 'check_RESE_parlmemeppisodes_fulloverlap' 
+	# but that in this script, we also want to be able to look at these data frames so they can be fixed.
+	# as such, the philospphy is that we put all the checks in the functions, and they simply return TRUE/FALSE, 
+	# so we can easily run data integrity checks in the other scripts, while here we get all the details on WHAT
+	# exactly is wrong, so it can be fixed.
+	
 		FDUBS <- RESE[
 					duplicated(RESE[, c("pers_id",
 									  "res_entry_start_posoxctformat",
@@ -202,13 +192,23 @@
 							   fromLast = TRUE),
 				]
 		
-		nrow(FDUBS) # OK, all cases are fixed now.
+		nrow(FDUBS) 
 		
 		# show for inspection and so cases can be fixed.
-		FDUBS[,c("res_entry_id","pers_id","res_entry_start","","res_entry_end","res_entry_raw")]
+		FDUBS[,c("res_entry_id","pers_id","res_entry_start","","res_entry_end","res_entry_raw")] # returns an error if there are no issue.
 	
 	# almost the exact same start AND OR endate (say 2 day different)
 	
+	# check, are there any almost fully overlapping dates?
+	
+		# load and check the functions again
+		source("R047_RESE_functions.R")	
+		test_file("R047_RESE_unittests.R")
+		
+		check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
+	
+	# see comment above, also here some code is 'repeated' so this is the 'script version' of the function above
+	# so we can do inspections!
 		# focus on core variables
 			RECO <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
 		

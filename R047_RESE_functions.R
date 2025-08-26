@@ -53,11 +53,98 @@ preprocess_RESEdates <- function(RESELOC) {
 }
 
 ###############################################################################
-# Function: check_anyNAinRESEdates
-# Returns TRUE if there are any NAs in either parsed date column.
+# Function: check_RESE_parlmemeppisodes_anyfulloverlap
+# Description:
+#   Check whether there are any fully overlapping parliamentary membership
+#   episodes in RESE. Two episodes are considered duplicates if they have
+#   the same pers_id, res_entry_start_posoxctformat, and res_entry_end_posoxctformat.
+#   Only rows with political_function == "NT_LE-LH_T3_NA_01" are checked.
+#
+# Returns:
+#   - TRUE  if one or more full duplicates are found
+#   - FALSE if no full duplicates are found
+#   - TRUE (with warning) if no parliamentary membership episodes exist
 ###############################################################################
-check_anyNAinRESEdates <- function(RESELOC) {
-  anystartdatesmissing <- sum(is.na(RESELOC$res_entry_start_posoxctformat)) > 0
-  anyenddatesmissing   <- sum(is.na(RESELOC$res_entry_end_posoxctformat))   > 0
-  anystartdatesmissing || anyenddatesmissing
+
+check_RESE_parlmemeppisodes_anyfulloverlap <- function(RESE) {
+
+  # filter on parliamentary membership episodes only
+  RESE <- RESE[which(RESE$political_function == "NT_LE-LH_T3_NA_01"), ]  
+
+  # no relevant rows -> warn + return FALSE (since no duplicates possible)
+  if (nrow(RESE) == 0) {
+    warning("No parliamentary membership episodes found in RESE")
+    return(FALSE)
+  }
+
+  # get a dataframe with all the duplicates
+  FDUBS <- RESE[
+    duplicated(RESE[, c("pers_id",
+                        "res_entry_start_posoxctformat",
+                        "res_entry_end_posoxctformat")]) |
+    duplicated(RESE[, c("pers_id",
+                        "res_entry_start_posoxctformat",
+                        "res_entry_end_posoxctformat")],
+               fromLast = TRUE),
+  ]
+
+  # TRUE if any duplicates exist, FALSE otherwise
+  nrow(FDUBS) > 0
 }
+
+###############################################################################
+# Function: check_RESE_anynear_fulloverlap
+# Description:
+#   Check whether any pairs of RESE rows (per pers_id) have start and end dates
+#   within a given tolerance (in days).
+#
+# Inputs:
+#   - RESE: data.frame with at least:
+#           pers_id,
+#           res_entry_start_posoxctformat (POSIXct),
+#           res_entry_end_posoxctformat   (POSIXct)
+#   - tolerance_days: integer(1), inclusive window for abs difference (default 2)
+#
+# Returns:
+#   - TRUE  if one or more near-full-overlap pairs exist
+#   - FALSE otherwise (including empty input)
+###############################################################################
+check_RESE_anynear_fulloverlap <- function(RESE, tolerance_days = 2) {
+  # sanity: required cols
+  req <- c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req, names(RESE))
+  if (length(miss)) stop("Missing required columns in RESE: ", paste(miss, collapse = ", "))
+
+  if (nrow(RESE) < 2) return(FALSE)  # can't have overlaps with < 2 rows
+
+  RECO <- RESE[, req, drop = FALSE]
+
+  AFDUBS <- dplyr::mutate(RECO, ROWID = dplyr::row_number()) %>%
+    dplyr::inner_join(
+      dplyr::mutate(RECO, ROWID = dplyr::row_number()),
+      by = "pers_id",
+      relationship = "many-to-many",  # silence expected self-join warning
+      suffix = c(".x", ".y")
+    ) %>%
+    dplyr::filter(
+      ROWID.x < ROWID.y,
+      !is.na(res_entry_start_posoxctformat.x),
+      !is.na(res_entry_start_posoxctformat.y),
+      !is.na(res_entry_end_posoxctformat.x),
+      !is.na(res_entry_end_posoxctformat.y),
+      abs(as.numeric(difftime(
+        res_entry_start_posoxctformat.x,
+        res_entry_start_posoxctformat.y,
+        units = "days"
+      ))) <= tolerance_days,
+      abs(as.numeric(difftime(
+        res_entry_end_posoxctformat.x,
+        res_entry_end_posoxctformat.y,
+        units = "days"
+      ))) <= tolerance_days
+    )
+
+  nrow(AFDUBS) > 0
+}
+
+
