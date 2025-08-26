@@ -1,13 +1,26 @@
 # /R047_RESE_unittests.R
-# ------------------------------------------------------------
-# Unit tests for:
-# - preprocess_RESEdates()
-# - check_anyNAinRESEdates()
-# ------------------------------------------------------------
+# ==================================================================
+# Global test setup for RESE-related unit tests
+# - Loads packages we rely on across tests
+# - Sources the RESE functions under test
+# - Defines common helpers used in multiple blocks
+# ==================================================================
 
+# Packages
 library(testthat)
+suppressPackageStartupMessages({
+  library(dplyr)  # used by near-overlap checker
+})
 
-# Minimal helper to build a tiny RESE-like df
+# Make sure the functions under test are available
+# (adjust path if your functions live elsewhere)
+source("R047_RESE_functions.R")
+
+# ------------------------------------------------------------------
+# Common helpers
+# ------------------------------------------------------------------
+
+# Minimal helper to build a tiny RESE-like df (string date inputs)
 mk_rese <- function(start, end) {
   data.frame(
     res_entry_start = start,
@@ -15,6 +28,64 @@ mk_rese <- function(start, end) {
     stringsAsFactors = FALSE
   )
 }
+
+# Helper to build a RESE-like df with parsed columns + required fields
+mk_rese_overlap <- function(political_function, pers_id, start_dates, end_dates) {
+  data.frame(
+    political_function = political_function,
+    pers_id = pers_id,
+    res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+# ==================================================================
+# New block: tests for referential integrity RESE -> POLI
+#   Function under test: check_RESE_persid_in_POLI()
+# ==================================================================
+
+# ------------------------------------------------------------------
+# Additional tests for: check_RESE_persid_in_POLI()
+# ------------------------------------------------------------------
+
+test_that("returns TRUE when all RESE pers_id are present in POLI", {
+  RESE <- data.frame(pers_id = c(1,2,3,3), stringsAsFactors = FALSE)
+  POLI <- data.frame(pers_id = 1:5, stringsAsFactors = FALSE)
+  expect_true(check_RESE_persid_in_POLI(RESE, POLI))
+})
+
+test_that("returns FALSE when some RESE pers_id are missing in POLI", {
+  RESE <- data.frame(pers_id = c(1,2,6), stringsAsFactors = FALSE)
+  POLI <- data.frame(pers_id = 1:5, stringsAsFactors = FALSE)
+  expect_false(check_RESE_persid_in_POLI(RESE, POLI))
+})
+
+test_that("works with empty RESE (trivially TRUE)", {
+  RESE <- data.frame(pers_id = integer(0))
+  POLI <- data.frame(pers_id = 1:5)
+  expect_true(check_RESE_persid_in_POLI(RESE, POLI))
+})
+
+test_that("errors when pers_id column is missing in either RESE or POLI", {
+  RESE <- data.frame(id = 1:3)
+  POLI <- data.frame(pers_id = 1:3)
+  expect_error(check_RESE_persid_in_POLI(RESE, POLI))
+
+  RESE <- data.frame(pers_id = 1:3)
+  POLI <- data.frame(id = 1:3)
+  expect_error(check_RESE_persid_in_POLI(RESE, POLI))
+})
+
+# ==================================================================
+# Core block: preprocess_RESEdates() and check_anyNAinRESEdates()
+# ==================================================================
+
+# ------------------------------------------------------------
+# Unit tests for:
+# - preprocess_RESEdates()
+# - check_anyNAinRESEdates()
+# ------------------------------------------------------------
 
 test_that("preprocess_RESEdates adds parsed POSIXct columns", {
   df <- mk_rese(c("01Jan2020","15Feb2021"), c("31Dec2020","28Feb2021"))
@@ -94,20 +165,13 @@ test_that("check_anyNAinRESEdates returns TRUE when any parsed date is NA", {
   expect_true(check_anyNAinRESEdates(out))
 })
 
+# ==================================================================
+# Block: check_RESE_parlmemeppisodes_anyfulloverlap()
+# ==================================================================
+
 # ------------------------------------------------------------------
 # Additional tests for: check_RESE_parlmemeppisodes_anyfulloverlap()
 # ------------------------------------------------------------------
-
-# Helper to build a RESE-like df with parsed columns + required fields
-mk_rese_overlap <- function(political_function, pers_id, start_dates, end_dates) {
-  data.frame(
-    political_function = political_function,
-    pers_id = pers_id,
-    res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
-    res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
-    stringsAsFactors = FALSE
-  )
-}
 
 test_that("full-overlap duplicate among parliamentary episodes returns TRUE", {
   df <- mk_rese_overlap(
@@ -168,6 +232,10 @@ test_that("NA-in-both dates duplicates are treated as duplicates (returns TRUE)"
   )
   expect_true(check_RESE_parlmemeppisodes_anyfulloverlap(df))
 })
+
+# ==================================================================
+# Block: check_RESE_anynear_fulloverlap()
+# ==================================================================
 
 # ------------------------------------------------------------------
 # Additional tests for: check_RESE_anynear_fulloverlap()
@@ -243,4 +311,3 @@ test_that("returns FALSE on completely empty data", {
   )
   expect_false(check_RESE_anynear_fulloverlap(df))
 })
-
