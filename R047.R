@@ -1,45 +1,40 @@
-######################################################################################
-#################################### SETUP ########################################### test
-######################################################################################
+# SETUP
 
-	# INSTRUCTIONS
-		# typically, one would run this script 'top to bottom' and fix issues higher up 
-			# before going on to the subsequent lines of codes (e.g. fix fully overlapping
-			# membership episodes before going into checking partially overlapping ones)
+# INSTRUCTIONS
+# Run this script 'top to bottom' and fix issues higher up before proceeding
+# (e.g. fix fully overlapping membership episodes before checking partially overlapping ones)
 
 
 
-	# change the language and date formatting to English if it is not already
-		Sys.setenv(LANG = "EN")
-		Sys.setlocale("LC_TIME", "English") # key, without this conversion to POSIXct does not work
-		Sys.getlocale(category = "LC_ALL")
+# Set language and date formatting to English
+Sys.setenv(LANG = "EN")
+Sys.setlocale("LC_TIME", "English")  # Required for POSIXct conversion
+Sys.getlocale(category = "LC_ALL")
 
-		setwd("F:/PolCa/Analysis/R/ProjectR047_PCCIntegrity")
-		getwd()
-	
-		# install.packages("sqldf")
-		# install.packages("stringr")
-		# install.packages("lubridate")
-		# install.packages("readr")
-		# install.packages("dplyr")
-		# install.packages("writexl")
-		# install.packages("testthat")
+setwd("F:/PolCa/Analysis/R/ProjectR047_PCCIntegrity")
+getwd()
+# Package installations (uncomment as needed)
+# install.packages("sqldf")
+# install.packages("stringr")
+# install.packages("lubridate")
+# install.packages("readr")
+# install.packages("dplyr")
+# install.packages("writexl")
+# install.packages("testthat")
 
-	# packages
-		library(sqldf)
-		library(stringr)
-		library(lubridate)
-		library(readr)
-		library(dplyr)
-		library(writexl)
-		library(openxlsx)
-		library(testthat)
-		
-	# Load some custom functions
-		source("R047_functions.R")
-		
-	# Run the unit tests from my test file
-		test_file("R047_unittests.R")
+# Load required packages
+library(sqldf)
+library(stringr)
+library(lubridate)
+library(readr)
+library(dplyr)
+library(writexl)
+library(openxlsx)
+library(testthat)
+
+# Load custom functions and run unit tests
+source("R047_functions.R")
+test_file("R047_unittests.R")
 	
 	# import and inspect all the PCC data-frames
 				
@@ -60,48 +55,15 @@
 				summary(PARL)
 				names(PARL)
 			
-			# not core at the moment
-			
-				# import and inspect election list entries
-				# ELEN = read.csv("PCC/ELEN.csv", header = TRUE, sep = ";")
-				# summary(ELEN)
-				# names(ELEN)
-
-				# import and inspect election districts
-				# ELDI = read.csv("PCC/ELDI.csv", header = TRUE, sep = ";")
-				# summary(ELDI)
-				# names(ELDI)
-					
-				# import and inspect election lists
-				# ELLI = read.csv("PCC/ELLI.csv", header = TRUE, sep = ";")
-				# summary(ELLI)
-				# names(ELLI)
-				
-				
-				# import and inspect faction eppisode level info
-				# FACT = read.csv("PCC/FACT.csv", header = TRUE, sep = ";")
-				# summary(FACT)
-				# names(FACT)
-				
-				# import and inspect party membership eppisodes
-				# MEME = read.csv("PCC/MEME.csv", header = TRUE, sep = ";")
-				# summary(MEME)
-				# names(MEME)
-				
-				# import and inspect election level information
-				# ELEC = read.csv("PCC/ELEC.csv", header = TRUE, sep = ";")
-				# summary(ELEC)
-				# names(ELEC)
-				
-				# import and inspect party level information
-				# PART = read.csv("PCC/PART.csv", header = TRUE, sep = ";")
-				# summary(PART)
-				# names(PART)
-				
-				# import and inspect quota level info
-				# QUOT = read.csv("PCC/QUOT.csv", header = TRUE, sep = ";")
-				# summary(QUOT)
-				# names(QUOT)
+# Additional datasets available but not loaded:
+# ELEN - Election list entries
+# ELDI - Election districts  
+# ELLI - Election lists
+# FACT - Faction episode level info
+# MEME - Party membership episodes
+# ELEC - Election level information
+# PART - Party level information
+# QUOT - Quota level info
 		
 ## bunch of date cleaning e.t.c.
 # call functions that do this, the idea is that we can run all the tests here easily in other scripts. 
