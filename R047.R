@@ -4,14 +4,12 @@
 # Run this script 'top to bottom' and fix issues higher up before proceeding
 # (e.g. fix fully overlapping membership episodes before checking partially overlapping ones)
 
-
-
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
 Sys.setlocale("LC_TIME", "English")  # Required for POSIXct conversion
 Sys.getlocale(category = "LC_ALL")
 
-setwd("F:/PolCa/Analysis/R/ProjectR047_PCCIntegrity")
+setwd("/home/tomas/projects/ProjectR047_PCCIntegrity")
 getwd()
 # Package installations (uncomment as needed)
 # install.packages("sqldf")
@@ -36,24 +34,24 @@ library(testthat)
 source("R047_functions.R")
 test_file("R047_unittests.R")
 	
-	# import and inspect all the PCC data-frames
-				
-			# core
-			
-				# import and inspect politician level information
-				POLI = read.csv("PCC/POLI.csv", header = TRUE, sep = ";")
-				summary(POLI)
-				names(POLI)
-				
-				# import and inspect all the resume entries
-				RESE = read.csv("PCC/RESE.csv", header = TRUE, sep = ";")
-				summary(RESE)
-				names(RESE)	
+# import and inspect all the PCC data-frames
 
-				# import and inspect parliamentary information
-				PARL = read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
-				summary(PARL)
-				names(PARL)
+# core
+
+# import and inspect politician level information
+POLI = read.csv("PCC/POLI.csv", header = TRUE, sep = ";")
+summary(POLI)
+names(POLI)
+				
+# import and inspect all the resume entries
+RESE = read.csv("PCC/RESE.csv", header = TRUE, sep = ";")
+summary(RESE)
+names(RESE)	
+
+# import and inspect parliamentary information
+PARL = read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
+summary(PARL)
+names(PARL)
 			
 # Additional datasets available but not loaded:
 # ELEN - Election list entries
@@ -65,99 +63,94 @@ test_file("R047_unittests.R")
 # PART - Party level information
 # QUOT - Quota level info
 		
-## bunch of date cleaning e.t.c.
-# call functions that do this, the idea is that we can run all the tests here easily in other scripts. 
+#### DATA PREPROCESSING AND VALIDATION #### 
 
-	# RESE
-		names(RESE)
-	
-		# for now, we focus on RESE episodes in the Netherlands
-			nrow(RESE)
-			RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]	
-			nrow(RESE)		
-	
-		# pre-process and check RESE 
-			source("R047_RESE_functions.R")	
-			test_file("R047_RESE_unittests.R")
-			
-			# pre-proces
-			RESE <- preprocess_RESEdates(RESE)
+# RESE
+names(RESE)
 
-			# no NA in dates
-			check_anyNAinRESEdates(RESE) # should return FALSE
-			
-			# do all pers_ids occur?
-			check_RESE_persid_in_POLI(RESE,POLI)
-			
-				# inspect!
-				RESE$pers_id[which(! RESE$pers_id %in% POLI$pers_id)]
-				
-			# are all the res_entry_ids unique?
-			
-				check_RESE_resentryid_unique(RESE)
-				
-				# inspect
-				unique(RESE$res_entry_id[duplicated(RESE$res_entry_id)])
-			
-	# PARL
-		names(PARL)
-		
-		# for now, we focus on PARL episodes in the Netherlands
-			nrow(PARL)
-			PARL <- PARL[which(PARL$country_abb == "NL"),]	
-			nrow(PARL)	
-		
-		# pre-process and check all RESE dates
-			source("R047_PARL_functions.R")	
-			test_file("R047_PARL_unittests.R")
-			
-			# pre-proces
-			PARL <- preprocess_PARLdates(PARL)
+# for now, we focus on RESE episodes in the Netherlands
+nrow(RESE)
+RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]
+nrow(RESE)
 
-			# no NA
-			check_anyNAinPARLdates(PARL) # should return FALSE
+# pre-process and check RESE
+source("R047_RESE_functions.R")
+test_file("R047_RESE_unittests.R")
+
+# pre-process
+RESE <- preprocess_RESEdates(RESE)
+
+# no NA in dates
+check_anyNAinRESEdates(RESE) # should return FALSE
+
+# do all pers_ids occur?
+check_RESE_persid_in_POLI(RESE,POLI)
+
+# inspect!
+RESE$pers_id[which(! RESE$pers_id %in% POLI$pers_id)]
+
+# are all the res_entry_ids unique?
+check_RESE_resentryid_unique(RESE)
+
+# inspect
+unique(RESE$res_entry_id[duplicated(RESE$res_entry_id)])
+			
+# PARL
+names(PARL)
+
+# for now, we focus on PARL episodes in the Netherlands
+nrow(PARL)
+PARL <- PARL[which(PARL$country_abb == "NL"),]
+nrow(PARL)
+
+# pre-process and check all PARL dates
+source("R047_PARL_functions.R")
+test_file("R047_PARL_unittests.R")
+
+# pre-process
+PARL <- preprocess_PARLdates(PARL)
+
+# no NA
+check_anyNAinPARLdates(PARL) # should return FALSE
 		
 	
-##### Politician Level #####
+#### POLITICIAN LEVEL DATA CHECKS ####
 
-#### check correct formatting of all the RESE dates
+## Check correct formatting of all the RESE dates
 
-	## RESE
-	# how many cases with none typical length 
-			# length is 9 for all complete entries
-			# length is 4 for all only year entries
-			
-				table(nchar(RESE$res_entry_start))
-				table(nchar(RESE$res_entry_end))
-				
-			# inspect some of the less usual cases
-				RESE[which(nchar(RESE$res_entry_end) == 7),] # so for NL, these are mainly a bunch of cases that have aug2012 as their enddate
-				
-			# check the result
-				table(is.na(RESE$res_entry_start_posoxctformat)) # should return all FALSE
-				table(is.na(RESE$res_entry_end_posoxctformat)) # should return all FALSE
+## RESE
+# how many cases with non-typical length
+# length is 9 for all complete entries
+# length is 4 for all only year entries
 
-			# are all the end dates after the start dates
-				table(RESE$res_entry_start_posoxctformat < RESE$res_entry_end_posoxctformat)
+table(nchar(RESE$res_entry_start))
+table(nchar(RESE$res_entry_end))
 
-#### check  for overlapping membership episodes for the same person
+# inspect some of the less usual cases
+RESE[which(nchar(RESE$res_entry_end) == 7),] # for NL, mainly cases with aug2012 as enddate
+
+# check the result
+table(is.na(RESE$res_entry_start_posoxctformat)) # should return all FALSE
+table(is.na(RESE$res_entry_end_posoxctformat)) # should return all FALSE
+
+# are all the end dates after the start dates
+table(RESE$res_entry_start_posoxctformat < RESE$res_entry_end_posoxctformat)
+
+## Check for overlapping membership episodes for the same person
 	
-	# check, are there any fully overlapping dates?
+# check, are there any fully overlapping dates?
+
+# functions and tests already loaded above
+
+check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
 	
-		# load and check the functions again
-		source("R047_RESE_functions.R")	
-		test_file("R047_RESE_unittests.R")
-		
-		check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
-	
-	# full overlap: exact same start and end dates
-	# note that this is roughly the same code as in 'check_RESE_parlmemeppisodes_fulloverlap' 
-	# but that in this script, we also want to be able to look at these data frames so they can be fixed.
-	# as such, the philospphy is that we put all the checks in the functions, and they simply return TRUE/FALSE, 
-	# so we can easily run data integrity checks in the other scripts, while here we get all the details on WHAT
-	# exactly is wrong, so it can be fixed.
-	
-		FDUBS <- RESE[
+# full overlap: exact same start and end dates
+# note that this is roughly the same code as in 'check_RESE_parlmemeppisodes_fulloverlap'
+# but that in this script, we also want to be able to look at these data frames so they can be fixed.
+# as such, the philosophy is that we put all the checks in the functions, and they simply return TRUE/FALSE,
+# so we can easily run data integrity checks in the other scripts, while here we get all the details on WHAT
+# exactly is wrong, so it can be fixed.
+fdubs <- RESE[
 					duplicated(RESE[, c("pers_id",
 									  "res_entry_start_posoxctformat",
 									  "res_entry_end_posoxctformat")]) |
@@ -167,33 +160,31 @@ test_file("R047_unittests.R")
 							   fromLast = TRUE),
 				]
 		
-		nrow(FDUBS) 
+		nrow(fdubs) 
 		
 		# show for inspection and so cases can be fixed.
-		FDUBS[,c("res_entry_id","pers_id","res_entry_start","","res_entry_end","res_entry_raw")] # returns an error if there are no issue.
+		fdubs[,c("res_entry_id","pers_id","res_entry_start","res_entry_end","res_entry_raw")] # returns an error if there are no issues.
 	
 	# almost the exact same start AND OR endate (say 2 day different)
 	
 	# check, are there any almost fully overlapping dates?
 	
-		# load and check the functions again
-		source("R047_RESE_functions.R")	
-		test_file("R047_RESE_unittests.R")
+		# functions and tests already loaded above
 		
 		check_RESE_anynear_fulloverlap(RESE)
 	
 	# see comment above, also here some code is 'repeated' so this is the 'script version' of the function above
 	# so we can do inspections!
 		# focus on core variables
-			RECO <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
+			reco <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
 		
-			AFDUBS <- RECO %>%
+			afdubs <- reco %>%
 				  # 1. Add a ROWID so we can avoid matching the same row to itself
 				  mutate(ROWID = row_number()) %>%
 				  
 				  # 2. Self-join on pers_id to compare every row with every other row
 				  inner_join(
-					RECO %>% mutate(ROWID = row_number()),
+					reco %>% mutate(ROWID = row_number()),
 					by = "pers_id",
 					suffix = c(".x", ".y")
 				  ) %>%
@@ -212,11 +203,11 @@ test_file("R047_unittests.R")
 								 units = "days")) <= 2
 				  )
 			
-			nrow(AFDUBS) 
-			head(AFDUBS)
+			nrow(afdubs) 
+			head(afdubs)
 		
 		# show for inspection and so cases can be fixed. # only one case left now: was already fixed in the excel file
-		AFDUBS[,c("res_entry_id.x","pers_id","res_entry_start.x","res_entry_end.x","res_entry_start.y","res_entry_end.y","res_entry_raw.x")]
+		afdubs[,c("res_entry_id.x","pers_id","res_entry_start.x","res_entry_end.x","res_entry_start.y","res_entry_end.y","res_entry_raw.x")]
 		
 		# alright, so the next step is find episodes with any overal for the same person
 		
@@ -243,14 +234,13 @@ test_file("R047_unittests.R")
 			}
 
 	
-		OVERLAP <- return_overlap(RESE) # please note that the 'many-to-many' error makes sense here
+		overlap <- return_overlap(RESE) # please note that the 'many-to-many' error makes sense here
 			
 			# get a vector with all the unique pers_ids that have overlapping eppisodes
-			allpersonswithoverlap <- unique(OVERLAP$pers_id)
+			allpersonswithoverlap <- unique(overlap$pers_id)
 			allpersonswithoverlap
 			length(allpersonswithoverlap)
 			
-		#	write.xlsx(data.frame(pers_id = allpersonswithoverlap), file = paste0("ALLPERSWITHOVERLAP_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
 			
 			# so I can check if the right amount of people got deleted: how many rows do these people all together have in RESE?
 			nrow(RESE[which(RESE$pers_id %in% allpersonswithoverlap),])
@@ -279,33 +269,33 @@ test_file("R047_unittests.R")
 		# export the whole shabang
 		
 			# Initialize IMPORT as an empty data frame
-			IMPORT <- NULL
+			import_data <- NULL
 
 			# Loop over all persons with overlapping episodes and append merged intervals
 			for (pid in allpersonswithoverlap) {
 			  merged_intervals <- merge_episodes(RESE, pid)
 			  if (!is.null(merged_intervals)) {
-				IMPORT <- rbind(IMPORT, merged_intervals)
+				import_data <- rbind(import_data, merged_intervals)
 			  }
 			}
 			
 			# some checks on import
-			head(IMPORT)
-			nrow(IMPORT)
+			head(import_data)
+			nrow(import_data)
 			
 			# for the function return_overlap to work we need posixdates in the dataframe
-			IMPORT$res_entry_start_posoxctformat <- as.POSIXct(as.character(IMPORT$res_entry_start),format=c("%d%b%Y"))
-			IMPORT$res_entry_end_posoxctformat <- as.POSIXct(as.character(IMPORT$res_entry_end),format=c("%d%b%Y"))
+			import_data$res_entry_start_posoxctformat <- as.POSIXct(as.character(import_data$res_entry_start),format=c("%d%b%Y"))
+			import_data$res_entry_end_posoxctformat <- as.POSIXct(as.character(import_data$res_entry_end),format=c("%d%b%Y"))
 			
 			# does it pass the check defined above of no overlapping intervals?
-				return_overlap(IMPORT) # should return zero
+				return_overlap(import_data) # should return zero
 
 				# Remove the POSIXct date columns from IMPORT as they are not needed in the export
-				IMPORT <- IMPORT %>% select(-res_entry_start_posoxctformat, -res_entry_end_posoxctformat)
+				import_data <- import_data %>% select(-res_entry_start_posoxctformat, -res_entry_end_posoxctformat)
 
-			# Create a timestamped filename in one line and export to Excel
-			filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
-		#	write.xlsx(IMPORT, file = filename)
+# Create a timestamped filename in one line and export to Excel
+filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
+# write.xlsx(import_data, file = filename)
 
 #################################### GAP DETECTION: EPISODES THAT ARE VERY CLOSE TOGETHER ##################################
 
@@ -319,12 +309,12 @@ GAPS
 # Alright, so these are for sure not things that are a hard check.
 
 # Run the two suspicious dates functions (for start and end dates)
-SUSPICIOUS_START_DATES <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
-SUSPICIOUS_START_DATES
+suspicious_start_dates <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
+suspicious_start_dates
 
-SUSPICIOUS_END_DATES   <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
-SUSPICIOUS_END_DATES
+suspicious_end_dates <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
+suspicious_end_dates
 
-# (Optional: Export results to Excel)
-# write.xlsx(SUSPICIOUS_START_DATES, file = paste0("Suspicious_Start_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
-# write.xlsx(SUSPICIOUS_END_DATES, file = paste0("Suspicious_End_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+# Optional: Export results to Excel
+# write.xlsx(suspicious_start_dates, file = paste0("Suspicious_Start_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+# write.xlsx(suspicious_end_dates, file = paste0("Suspicious_End_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
