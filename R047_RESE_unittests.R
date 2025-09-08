@@ -250,7 +250,7 @@ test_that("no full-overlap duplicates among parliamentary episodes returns FALSE
   expect_false(check_RESE_parlmemeppisodes_anyfulloverlap(df))
 })
 
-test_that("non-parliamentary rows only: warns and returns FALSE", {
+test_that("non-parliamentary rows only: warns and returns TRUE", {
   df <- mk_rese_overlap(
     political_function = c("OTHER","OTHER"),
     pers_id     = c(1,1),
@@ -262,10 +262,10 @@ test_that("non-parliamentary rows only: warns and returns FALSE", {
     regexp = "No parliamentary membership episodes found",
     fixed  = TRUE
   )
-  expect_false(res)
+  expect_true(res)
 })
 
-test_that("empty after filter: warns and returns FALSE", {
+test_that("empty after filter: warns and returns TRUE", {
   df <- mk_rese_overlap(
     political_function = character(0),
     pers_id     = integer(0),
@@ -277,7 +277,7 @@ test_that("empty after filter: warns and returns FALSE", {
     regexp = "No parliamentary membership episodes found",
     fixed  = TRUE
   )
-  expect_false(res)
+  expect_true(res)
 })
 
 test_that("NA-in-both dates duplicates are treated as duplicates (returns TRUE)", {

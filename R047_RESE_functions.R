@@ -127,7 +127,7 @@ check_anyNAinRESEdates <- function(RESELOC) {
 # Returns:
 #   - TRUE  if one or more full duplicates are found
 #   - FALSE if no full duplicates are found
-#   - TRUE (with warning) if no parliamentary membership episodes exist
+#   - TRUE  (with warning) if no parliamentary membership episodes exist
 ###############################################################################
 
 check_RESE_parlmemeppisodes_anyfulloverlap <- function(RESE) {
@@ -135,10 +135,10 @@ check_RESE_parlmemeppisodes_anyfulloverlap <- function(RESE) {
   # filter on parliamentary membership episodes only
   RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")), ]  
 
-  # no relevant rows -> warn + return FALSE (since no duplicates possible)
+  # no relevant rows -> warn + return TRUE (this IS a data integrity issue)
   if (nrow(RESE) == 0) {
     warning("No parliamentary membership episodes found in RESE")
-    return(FALSE)
+    return(TRUE)
   }
 
   # get a dataframe with all the duplicates
