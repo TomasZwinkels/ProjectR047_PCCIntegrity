@@ -122,7 +122,7 @@ check_anyNAinRESEdates <- function(RESELOC) {
 #   Check whether there are any fully overlapping parliamentary membership
 #   episodes in RESE. Two episodes are considered duplicates if they have
 #   the same pers_id, res_entry_start_posoxctformat, and res_entry_end_posoxctformat.
-#   Only rows with political_function == "NT_LE-LH_T3_NA_01" are checked.
+#   Only rows with political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01") are checked.
 #
 # Returns:
 #   - TRUE  if one or more full duplicates are found
@@ -133,7 +133,7 @@ check_anyNAinRESEdates <- function(RESELOC) {
 check_RESE_parlmemeppisodes_anyfulloverlap <- function(RESE) {
 
   # filter on parliamentary membership episodes only
-  RESE <- RESE[which(RESE$political_function == "NT_LE-LH_T3_NA_01"), ]  
+  RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")), ]  
 
   # no relevant rows -> warn + return FALSE (since no duplicates possible)
   if (nrow(RESE) == 0) {

@@ -220,6 +220,26 @@ test_that("full-overlap duplicate among parliamentary episodes returns TRUE", {
   expect_true(check_RESE_parlmemeppisodes_anyfulloverlap(df))
 })
 
+test_that("full-overlap duplicate with alternative political function code returns TRUE", {
+  df <- mk_rese_overlap(
+    political_function = c("NT_LE_T3_NA_01","NT_LE_T3_NA_01","OTHER"),
+    pers_id     = c(1,1,2),
+    start_dates = c("2020-01-01","2020-01-01","2020-01-01"),
+    end_dates   = c("2020-12-31","2020-12-31","2020-12-31")
+  )
+  expect_true(check_RESE_parlmemeppisodes_anyfulloverlap(df))
+})
+
+test_that("mixed political function codes both detected", {
+  df <- mk_rese_overlap(
+    political_function = c("NT_LE-LH_T3_NA_01","NT_LE_T3_NA_01","OTHER"),
+    pers_id     = c(1,1,2),
+    start_dates = c("2020-01-01","2020-01-01","2020-01-01"),
+    end_dates   = c("2020-12-31","2020-12-31","2020-12-31")
+  )
+  expect_true(check_RESE_parlmemeppisodes_anyfulloverlap(df))
+})
+
 test_that("no full-overlap duplicates among parliamentary episodes returns FALSE", {
   df <- mk_rese_overlap(
     political_function = c("NT_LE-LH_T3_NA_01","NT_LE-LH_T3_NA_01"),
