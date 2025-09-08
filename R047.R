@@ -1,7 +1,7 @@
 # SETUP
 
 # Configuration: Set country code for analysis
-country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland)
+country_code <- "CH"  # Options: "NL" (Netherlands), "CH" (Switzerland)
 
 # INSTRUCTIONS
 # Run this script 'top to bottom' and fix issues higher up before proceeding
@@ -79,6 +79,49 @@ nrow(RESE)
 # pre-process and check RESE
 source("R047_RESE_functions.R")
 test_file("R047_RESE_unittests.R")
+
+# === INSPECTION: Swiss Parliamentary Chambers and Generat Better Values for an IMPORT ===
+
+table(RESE$parliament_id)
+sum(grepl("NT-NR", unique(RESE$parliament_id)) & grepl("NT-SR", unique(RESE$parliament_id)))
+RESE$chamber <- ifelse(grepl("NT-NR", RESE$parliament_id), "NR", ifelse(grepl("NT-SR", RESE$parliament_id), "SR", "OTHER"))
+table(RESE$chamber)
+
+# Check res_entry_raw for chamber consistency
+nationalrat_patterns <- c("Nationalrat", "National Council", "Lower House", "Erste Kammer", "\\bNR\\b", "Conseil national")
+staenderat_patterns <- c("Ständerat", "Staenderat", "Council of States", "Upper House", "Zweite Kammer", "\\bSR\\b", "Conseil des États")
+
+nr_in_raw <- grepl(paste(nationalrat_patterns, collapse = "|"), RESE$res_entry_raw, ignore.case = TRUE)
+sr_in_raw <- grepl(paste(staenderat_patterns, collapse = "|"), RESE$res_entry_raw, ignore.case = TRUE)
+
+# Check for inconsistencies
+inconsistent_nr <- sum(RESE$chamber == "NR" & sr_in_raw)
+inconsistent_sr <- sum(RESE$chamber == "SR" & nr_in_raw)
+
+cat("Inconsistencies found - NR records with SR text:", inconsistent_nr, "\n")
+cat("Inconsistencies found - SR records with NR text:", inconsistent_sr, "\n")
+
+if(inconsistent_nr > 0 || inconsistent_sr > 0) {
+  stop("INCONSISTENT CHAMBER DATA FOUND - stopping export generation")
+}
+
+# Export chamber-specific political function codes for data update
+RESE_export <- RESE[, c("res_entry_id", "political_function", "chamber")]
+RESE_export$political_function_updated <- ifelse(
+  RESE_export$chamber == "NR", "NT_LE-LH_T3_NA_01",
+  ifelse(RESE_export$chamber == "SR", "NT_LE-UH_T3_NA_01", 
+         RESE_export$political_function)
+)
+
+# Keep only the columns needed for update
+RESE_export <- RESE_export[, c("res_entry_id", "political_function_updated")]
+names(RESE_export) <- c("res_entry_id", "political_function")
+
+# Export to CSV
+write.csv(RESE_export, "RESE_chamber_updates.csv", row.names = FALSE)
+cat("Exported", nrow(RESE_export), "records to RESE_chamber_updates.csv\n")
+cat("NR (Nationalrat) -> NT_LE-LH_T3_NA_01\n")
+cat("SR (Ständerat) -> NT_LE-UH_T3_NA_01\n")
 
 # pre-process
 RESE <- preprocess_RESEdates(RESE)
