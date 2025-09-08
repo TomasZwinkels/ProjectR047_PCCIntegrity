@@ -1,5 +1,8 @@
 # SETUP
 
+# Configuration: Set country code for analysis
+country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland)
+
 # INSTRUCTIONS
 # Run this script 'top to bottom' and fix issues higher up before proceeding
 # (e.g. fix fully overlapping membership episodes before checking partially overlapping ones)
@@ -68,9 +71,9 @@ names(PARL)
 # RESE
 names(RESE)
 
-# for now, we focus on RESE episodes in the Netherlands
+# Focus on RESE episodes in selected country
 nrow(RESE)
-RESE <- RESE[which(RESE$country_abb == "NL" & RESE$political_function == "NT_LE-LH_T3_NA_01"),]
+RESE <- RESE[which(RESE$country_abb == country_code & RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")),]
 nrow(RESE)
 
 # pre-process and check RESE
@@ -98,9 +101,9 @@ unique(RESE$res_entry_id[duplicated(RESE$res_entry_id)])
 # PARL
 names(PARL)
 
-# for now, we focus on PARL episodes in the Netherlands
+# Focus on PARL episodes in selected country
 nrow(PARL)
-PARL <- PARL[which(PARL$country_abb == "NL"),]
+PARL <- PARL[which(PARL$country_abb == country_code),]
 nrow(PARL)
 
 # pre-process and check all PARL dates
@@ -150,7 +153,7 @@ check_RESE_parlmemeppisodes_anyfulloverlap(RESE)
 # as such, the philosophy is that we put all the checks in the functions, and they simply return TRUE/FALSE,
 # so we can easily run data integrity checks in the other scripts, while here we get all the details on WHAT
 # exactly is wrong, so it can be fixed.
-fdubs <- RESE[
+FDUBS <- RESE[
 					duplicated(RESE[, c("pers_id",
 									  "res_entry_start_posoxctformat",
 									  "res_entry_end_posoxctformat")]) |
@@ -160,10 +163,10 @@ fdubs <- RESE[
 							   fromLast = TRUE),
 				]
 		
-		nrow(fdubs) 
+		nrow(FDUBS) 
 		
 		# show for inspection and so cases can be fixed.
-		fdubs[,c("res_entry_id","pers_id","res_entry_start","res_entry_end","res_entry_raw")] # returns an error if there are no issues.
+		FDUBS[,c("res_entry_id","pers_id","res_entry_start","res_entry_end","res_entry_raw")] # returns an error if there are no issues.
 	
 	# almost the exact same start AND OR endate (say 2 day different)
 	
@@ -176,15 +179,15 @@ fdubs <- RESE[
 	# see comment above, also here some code is 'repeated' so this is the 'script version' of the function above
 	# so we can do inspections!
 		# focus on core variables
-			reco <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
+			RECO <- RESE[,c("res_entry_id","pers_id","res_entry_start","res_entry_start_posoxctformat","res_entry_end","res_entry_end_posoxctformat","res_entry_raw")]
 		
-			afdubs <- reco %>%
+			AFDUBS <- RECO %>%
 				  # 1. Add a ROWID so we can avoid matching the same row to itself
 				  mutate(ROWID = row_number()) %>%
 				  
 				  # 2. Self-join on pers_id to compare every row with every other row
 				  inner_join(
-					reco %>% mutate(ROWID = row_number()),
+					RECO %>% mutate(ROWID = row_number()),
 					by = "pers_id",
 					suffix = c(".x", ".y")
 				  ) %>%
@@ -203,11 +206,11 @@ fdubs <- RESE[
 								 units = "days")) <= 2
 				  )
 			
-			nrow(afdubs) 
-			head(afdubs)
+			nrow(AFDUBS) 
+			head(AFDUBS)
 		
 		# show for inspection and so cases can be fixed. # only one case left now: was already fixed in the excel file
-		afdubs[,c("res_entry_id.x","pers_id","res_entry_start.x","res_entry_end.x","res_entry_start.y","res_entry_end.y","res_entry_raw.x")]
+		AFDUBS[,c("res_entry_id.x","pers_id","res_entry_start.x","res_entry_end.x","res_entry_start.y","res_entry_end.y","res_entry_raw.x")]
 		
 		# alright, so the next step is find episodes with any overal for the same person
 		
@@ -234,10 +237,10 @@ fdubs <- RESE[
 			}
 
 	
-		overlap <- return_overlap(RESE) # please note that the 'many-to-many' error makes sense here
+		OVERLAP <- return_overlap(RESE) # please note that the 'many-to-many' error makes sense here
 			
 			# get a vector with all the unique pers_ids that have overlapping eppisodes
-			allpersonswithoverlap <- unique(overlap$pers_id)
+			allpersonswithoverlap <- unique(OVERLAP$pers_id)
 			allpersonswithoverlap
 			length(allpersonswithoverlap)
 			
@@ -269,33 +272,33 @@ fdubs <- RESE[
 		# export the whole shabang
 		
 			# Initialize IMPORT as an empty data frame
-			import_data <- NULL
+			IMPORT_DATA <- NULL
 
 			# Loop over all persons with overlapping episodes and append merged intervals
 			for (pid in allpersonswithoverlap) {
 			  merged_intervals <- merge_episodes(RESE, pid)
 			  if (!is.null(merged_intervals)) {
-				import_data <- rbind(import_data, merged_intervals)
+				IMPORT_DATA <- rbind(IMPORT_DATA, merged_intervals)
 			  }
 			}
 			
 			# some checks on import
-			head(import_data)
-			nrow(import_data)
+			head(IMPORT_DATA)
+			nrow(IMPORT_DATA)
 			
 			# for the function return_overlap to work we need posixdates in the dataframe
-			import_data$res_entry_start_posoxctformat <- as.POSIXct(as.character(import_data$res_entry_start),format=c("%d%b%Y"))
-			import_data$res_entry_end_posoxctformat <- as.POSIXct(as.character(import_data$res_entry_end),format=c("%d%b%Y"))
+			IMPORT_DATA$res_entry_start_posoxctformat <- as.POSIXct(as.character(IMPORT_DATA$res_entry_start),format=c("%d%b%Y"))
+			IMPORT_DATA$res_entry_end_posoxctformat <- as.POSIXct(as.character(IMPORT_DATA$res_entry_end),format=c("%d%b%Y"))
 			
 			# does it pass the check defined above of no overlapping intervals?
-				return_overlap(import_data) # should return zero
+				return_overlap(IMPORT_DATA) # should return zero
 
 				# Remove the POSIXct date columns from IMPORT as they are not needed in the export
-				import_data <- import_data %>% select(-res_entry_start_posoxctformat, -res_entry_end_posoxctformat)
+				IMPORT_DATA <- IMPORT_DATA %>% select(-res_entry_start_posoxctformat, -res_entry_end_posoxctformat)
 
 # Create a timestamped filename in one line and export to Excel
 filename <- paste0("IMPORT_MERGED_NLRESE_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
-# write.xlsx(import_data, file = filename)
+# write.xlsx(IMPORT_DATA, file = filename)
 
 #################################### GAP DETECTION: EPISODES THAT ARE VERY CLOSE TOGETHER ##################################
 
@@ -309,12 +312,12 @@ GAPS
 # Alright, so these are for sure not things that are a hard check.
 
 # Run the two suspicious dates functions (for start and end dates)
-suspicious_start_dates <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
-suspicious_start_dates
+SUSPICIOUS_START_DATES <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
+SUSPICIOUS_START_DATES
 
-suspicious_end_dates <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
-suspicious_end_dates
+SUSPICIOUS_END_DATES <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
+SUSPICIOUS_END_DATES
 
 # Optional: Export results to Excel
-# write.xlsx(suspicious_start_dates, file = paste0("Suspicious_Start_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
-# write.xlsx(suspicious_end_dates, file = paste0("Suspicious_End_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+# write.xlsx(SUSPICIOUS_START_DATES, file = paste0("Suspicious_Start_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
+# write.xlsx(SUSPICIOUS_END_DATES, file = paste0("Suspicious_End_Dates_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx"))
