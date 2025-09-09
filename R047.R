@@ -42,17 +42,17 @@ test_file("R047_unittests.R")
 # core
 
 # import and inspect politician level information
-POLI = read.csv("PCC/POLI.csv", header = TRUE, sep = ";")
+POLI = read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";")
 summary(POLI)
 names(POLI)
 				
 # import and inspect all the resume entries
-RESE = read.csv("PCC/RESE.csv", header = TRUE, sep = ";")
+RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")
 summary(RESE)
 names(RESE)	
 
 # import and inspect parliamentary information
-PARL = read.csv("PCC/PARL.csv", header = TRUE, sep = ";")
+PARL = read.csv("/home/tomas/projects/PCCdata/PARL.csv", header = TRUE, sep = ";")
 summary(PARL)
 names(PARL)
 			
