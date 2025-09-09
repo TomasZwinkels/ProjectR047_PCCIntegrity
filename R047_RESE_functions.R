@@ -211,4 +211,183 @@ check_RESE_anynear_fulloverlap <- function(RESE, tolerance_days = 2) {
   nrow(AFDUBS) > 0
 }
 
+###############################################################################
+# DETAILS FUNCTIONS - Return detailed data objects for inspection
+###############################################################################
+
+###############################################################################
+# Function: check_RESE_persid_in_POLI_details
+# Description: Return missing person IDs and related data for detailed inspection
+# Returns: List with missing_ids vector, missing_count, and summary data
+###############################################################################
+check_RESE_persid_in_POLI_details <- function(RESE, POLI) {
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+
+  missing_ids <- setdiff(unique(RESE$pers_id), unique(POLI$pers_id))
+  
+  # Return rows from RESE that have missing person IDs
+  missing_rows <- if(length(missing_ids) > 0) {
+    RESE[RESE$pers_id %in% missing_ids, ]
+  } else {
+    RESE[0, ]
+  }
+  
+  list(
+    check_passed = length(missing_ids) == 0,
+    missing_ids = missing_ids,
+    missing_count = length(missing_ids),
+    missing_rows = missing_rows,
+    total_unique_rese_ids = length(unique(RESE$pers_id)),
+    total_unique_poli_ids = length(unique(POLI$pers_id))
+  )
+}
+
+###############################################################################
+# Function: check_RESE_resentryid_unique_details  
+# Description: Return duplicate entry IDs and all rows containing duplicates
+# Returns: List with duplicate_ids vector and duplicate_rows data.frame
+###############################################################################
+check_RESE_resentryid_unique_details <- function(RESE) {
+  if (!"res_entry_id" %in% names(RESE)) {
+    stop("RESE is missing column res_entry_id")
+  }
+  
+  duplicated_logical <- duplicated(RESE$res_entry_id)
+  duplicate_ids <- if(any(duplicated_logical)) {
+    unique(RESE$res_entry_id[duplicated_logical])
+  } else {
+    character(0)
+  }
+  
+  # Return ALL rows that contain any duplicate ID (not just the duplicated ones)
+  duplicate_rows <- if(length(duplicate_ids) > 0) {
+    RESE[RESE$res_entry_id %in% duplicate_ids, ]
+  } else {
+    RESE[0, ]
+  }
+  
+  list(
+    check_passed = !any(duplicated_logical),
+    duplicate_ids = duplicate_ids,
+    duplicate_count = length(duplicate_ids),
+    duplicate_rows = duplicate_rows,
+    total_rows = nrow(RESE)
+  )
+}
+
+###############################################################################
+# Function: check_anyNAinRESEdates_details
+# Description: Return rows and indices with NA dates after preprocessing  
+# Returns: List with NA row indices and the actual rows with problems
+###############################################################################
+check_anyNAinRESEdates_details <- function(RESELOC) {
+  req <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req, names(RESELOC))
+  if (length(miss) > 0) {
+    stop("RESELOC is missing columns: ", paste(miss, collapse = ", "))
+  }
+  
+  na_start <- is.na(RESELOC$res_entry_start_posoxctformat)
+  na_end <- is.na(RESELOC$res_entry_end_posoxctformat)
+  na_either <- na_start | na_end
+  
+  list(
+    check_passed = !any(na_start) && !any(na_end),
+    na_start_count = sum(na_start),
+    na_end_count = sum(na_end),
+    na_start_rows = which(na_start),
+    na_end_rows = which(na_end),
+    na_either_rows = which(na_either),
+    rows_with_na_dates = RESELOC[na_either, ],
+    total_rows = nrow(RESELOC)
+  )
+}
+
+###############################################################################
+# Function: check_RESE_parlmemeppisodes_anyfulloverlap_details
+# Description: Return all overlapping parliamentary episodes as data.frame
+# Returns: List with overlapping episodes data and affected persons
+###############################################################################
+check_RESE_parlmemeppisodes_anyfulloverlap_details <- function(RESE) {
+  parl_episodes <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")), ]  
+  
+  if (nrow(parl_episodes) == 0) {
+    return(list(
+      check_passed = FALSE,
+      warning_message = "No parliamentary membership episodes found",
+      overlapping_episodes = RESE[0, ],
+      overlap_count = 0,
+      affected_persons = character(0),
+      total_parl_episodes = 0
+    ))
+  }
+  
+  # Get all overlapping episodes
+  overlap_episodes <- parl_episodes[
+    duplicated(parl_episodes[, c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")]) |
+    duplicated(parl_episodes[, c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")], fromLast = TRUE),
+  ]
+  
+  list(
+    check_passed = nrow(overlap_episodes) == 0,
+    overlapping_episodes = overlap_episodes,
+    overlap_count = nrow(overlap_episodes),
+    affected_persons = unique(overlap_episodes$pers_id),
+    total_parl_episodes = nrow(parl_episodes),
+    original_parl_episodes = parl_episodes
+  )
+}
+
+###############################################################################
+# Function: check_RESE_anynear_fulloverlap_details
+# Description: Return detailed pairs of near-overlapping episodes
+# Returns: List with paired data showing which episodes are nearly overlapping
+###############################################################################
+check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
+  req <- c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req, names(RESE))
+  if (length(miss) > 0) {
+    stop("RESE is missing columns: ", paste(miss, collapse = ", "))
+  }
+  
+  if (nrow(RESE) < 2) {
+    return(list(
+      check_passed = TRUE,
+      near_overlapping_pairs = data.frame(),
+      near_overlap_count = 0,
+      affected_persons = character(0),
+      tolerance_days = tolerance_days,
+      total_rows = nrow(RESE)
+    ))
+  }
+  
+  # Create comparison pairs
+  RECO <- RESE[, c("res_entry_id", "pers_id", "res_entry_start", 
+                   "res_entry_start_posoxctformat", "res_entry_end", 
+                   "res_entry_end_posoxctformat", "res_entry_raw")]
+  
+  near_pairs <- RECO %>%
+    mutate(ROWID = row_number()) %>%
+    inner_join(RECO %>% mutate(ROWID = row_number()), by = "pers_id", suffix = c(".x", ".y")) %>%
+    filter(
+      ROWID.x < ROWID.y,
+      abs(difftime(res_entry_start_posoxctformat.x, res_entry_start_posoxctformat.y, units = "days")) <= tolerance_days,
+      abs(difftime(res_entry_end_posoxctformat.x, res_entry_end_posoxctformat.y, units = "days")) <= tolerance_days
+    ) %>%
+    mutate(
+      start_diff_days = as.numeric(difftime(res_entry_start_posoxctformat.x, res_entry_start_posoxctformat.y, units = "days")),
+      end_diff_days = as.numeric(difftime(res_entry_end_posoxctformat.x, res_entry_end_posoxctformat.y, units = "days"))
+    )
+  
+  list(
+    check_passed = nrow(near_pairs) == 0,
+    near_overlapping_pairs = near_pairs,
+    near_overlap_count = nrow(near_pairs),
+    affected_persons = unique(near_pairs$pers_id),
+    tolerance_days = tolerance_days,
+    total_rows = nrow(RESE)
+  )
+}
+
 

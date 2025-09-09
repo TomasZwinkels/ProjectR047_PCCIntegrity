@@ -52,3 +52,35 @@ check_anyNAinPARLdates <- function(PARLLOC) {
   any_end_na   <- sum(is.na(PARLLOC$leg_period_end_posoxctformat))   > 0
   any_start_na || any_end_na
 }
+
+###############################################################################
+# DETAILS FUNCTIONS - Return detailed data objects for inspection
+###############################################################################
+
+###############################################################################
+# Function: check_anyNAinPARLdates_details
+# Description: Return rows and indices with NA dates after preprocessing
+# Returns: List with NA row indices and the actual rows with problems
+###############################################################################
+check_anyNAinPARLdates_details <- function(PARLLOC) {
+  req <- c("leg_period_start_posoxctformat", "leg_period_end_posoxctformat")
+  miss <- setdiff(req, names(PARLLOC))
+  if (length(miss) > 0) {
+    stop("PARLLOC is missing columns: ", paste(miss, collapse = ", "))
+  }
+  
+  na_start <- is.na(PARLLOC$leg_period_start_posoxctformat)
+  na_end <- is.na(PARLLOC$leg_period_end_posoxctformat)
+  na_either <- na_start | na_end
+  
+  list(
+    check_passed = !any(na_start) && !any(na_end),
+    na_start_count = sum(na_start),
+    na_end_count = sum(na_end),
+    na_start_rows = which(na_start),
+    na_end_rows = which(na_end),
+    na_either_rows = which(na_either),
+    rows_with_na_dates = PARLLOC[na_either, ],
+    total_rows = nrow(PARLLOC)
+  )
+}
