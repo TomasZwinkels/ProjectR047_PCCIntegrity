@@ -3,10 +3,10 @@
 
 # SETUP
 country_code <- "CH"
-setwd("/home/tomas/projects/ProjectR047_PCCIntegrity")
+setwd("/home/tomas/projects/ProjectR047_PCCIntegrity/fixing_projects")
 
-# Load functions
-source("R047_RESE_functions.R")
+# Load functions (from parent directory)
+source("../R047_RESE_functions.R")
 
 # Load data
 RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")

@@ -5,10 +5,10 @@
 # SETUP - Configure country
 country_code <- "NL"  # Change to "CH" for Switzerland, "NL" for Netherlands
 
-setwd("/home/tomas/projects/ProjectR047_PCCIntegrity")
+setwd("/home/tomas/projects/ProjectR047_PCCIntegrity/fixing_projects")
 
-# Load functions and data
-source("R047_RESE_functions.R")
+# Load functions and data (from parent directory)
+source("../R047_RESE_functions.R")
 
 RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")
 POLI = read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";")

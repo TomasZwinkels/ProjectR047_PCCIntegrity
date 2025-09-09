@@ -104,16 +104,16 @@ if (checks_passed == total_checks) {
   if (!entry_id_check) cat("  - Run deepdive script for duplicate entry ID details\n")
   if (!rese_dates_check) cat("  - Run deepdive script for RESE date parsing details\n")
   if (!parl_dates_check) cat("  - Run deepdive script for PARL date parsing details\n")
-  if (!full_overlap_check) cat("  - Run 'overlapping_episodes_fixes.R' to generate merged episodes\n")
+  if (!full_overlap_check) cat("  - Run 'fixing_projects/overlapping_episodes_fixes.R' to generate merged episodes\n")
   if (!near_overlap_check) cat("  - Run deepdive script for near-overlap details\n")
   
   cat("\nCountry-specific deepdive scripts:\n")
   cat("  - CH_deepdive.R (for Switzerland detailed investigation)\n")
-  cat("  - Create NL_deepdive.R (for Netherlands detailed investigation)\n")
+  cat("  - NL_deepdive.R (for Netherlands detailed investigation)\n")
   
-  cat("\nData fix scripts:\n")
-  cat("  - CH_chamber_function_fixes.R (Swiss chamber political function corrections)\n")
-  cat("  - overlapping_episodes_fixes.R (merge overlapping episodes)\n")
+  cat("\nData fix scripts (in fixing_projects/ folder):\n")
+  cat("  - fixing_projects/CH_chamber_function_fixes.R (Swiss chamber political function corrections)\n")
+  cat("  - fixing_projects/overlapping_episodes_fixes.R (merge overlapping episodes)\n")
 }
 
 cat("\n=== R047 STREAMLINED COMPLETE ===\n")
