@@ -46,8 +46,16 @@ preprocess_PARLdates <- function(PARLLOC) {
 ###############################################################################
 # Function: check_anyNAinPARLdates
 # Returns TRUE if there are any NAs in either parsed PARL date column.
+# Optional level parameter to filter by parliament level (e.g., "NT" for national)
 ###############################################################################
-check_anyNAinPARLdates <- function(PARLLOC) {
+check_anyNAinPARLdates <- function(PARLLOC, level = NULL) {
+  if (!is.null(level)) {
+    if (!"level" %in% names(PARLLOC)) {
+      stop("PARLLOC is missing 'level' column needed for filtering")
+    }
+    PARLLOC <- PARLLOC[PARLLOC$level == level, ]
+  }
+  
   any_start_na <- sum(is.na(PARLLOC$leg_period_start_posoxctformat)) > 0
   any_end_na   <- sum(is.na(PARLLOC$leg_period_end_posoxctformat))   > 0
   any_start_na || any_end_na
@@ -61,12 +69,20 @@ check_anyNAinPARLdates <- function(PARLLOC) {
 # Function: check_anyNAinPARLdates_details
 # Description: Return rows and indices with NA dates after preprocessing
 # Returns: List with NA row indices and the actual rows with problems
+# Optional level parameter to filter by parliament level (e.g., "NT" for national)
 ###############################################################################
-check_anyNAinPARLdates_details <- function(PARLLOC) {
+check_anyNAinPARLdates_details <- function(PARLLOC, level = NULL) {
   req <- c("leg_period_start_posoxctformat", "leg_period_end_posoxctformat")
   miss <- setdiff(req, names(PARLLOC))
   if (length(miss) > 0) {
     stop("PARLLOC is missing columns: ", paste(miss, collapse = ", "))
+  }
+  
+  if (!is.null(level)) {
+    if (!"level" %in% names(PARLLOC)) {
+      stop("PARLLOC is missing 'level' column needed for filtering")
+    }
+    PARLLOC <- PARLLOC[PARLLOC$level == level, ]
   }
   
   na_start <- is.na(PARLLOC$leg_period_start_posoxctformat)
@@ -80,7 +96,7 @@ check_anyNAinPARLdates_details <- function(PARLLOC) {
     na_start_rows = which(na_start),
     na_end_rows = which(na_end),
     na_either_rows = which(na_either),
-    rows_with_na_dates = PARLLOC[na_either, ],
+    full_rows_with_na_dates = PARLLOC[na_either, ],
     total_rows = nrow(PARLLOC)
   )
 }

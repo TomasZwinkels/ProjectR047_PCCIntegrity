@@ -11,12 +11,16 @@ library(testthat)
 source("R047_PARL_functions.R")
 
 # Tiny helper to build a PARL-like df
-mk_parl <- function(start, end) {
-  data.frame(
+mk_parl <- function(start, end, level = NULL) {
+  df <- data.frame(
     leg_period_start = start,
     leg_period_end   = end,
     stringsAsFactors = FALSE
   )
+  if (!is.null(level)) {
+    df$level <- level
+  }
+  df
 }
 
 test_that("preprocess_PARLdates adds parsed POSIXct columns", {
@@ -90,4 +94,62 @@ test_that("check_anyNAinPARLdates TRUE iff any parsed date is NA", {
 
   expect_false(check_anyNAinPARLdates(good))
   expect_true(check_anyNAinPARLdates(bad))
+})
+
+test_that("check_anyNAinPARLdates filters by level parameter", {
+  # Mixed data: NT level has good dates, regional level has bad dates
+  df <- mk_parl(c("01Jan2020", "BADDATE", "15Feb2021"), 
+                c("31Dec2020", "BADDATE", "28Feb2021"),
+                level = c("NT", "REGIONAL", "NT"))
+  processed <- preprocess_PARLdates(df)
+  
+  # Without level filter: should detect NA (from REGIONAL level)
+  expect_true(check_anyNAinPARLdates(processed))
+  
+  # With NT level filter: should be clean
+  expect_false(check_anyNAinPARLdates(processed, level = "NT"))
+  
+  # With REGIONAL level filter: should detect NA
+  expect_true(check_anyNAinPARLdates(processed, level = "REGIONAL"))
+})
+
+test_that("check_anyNAinPARLdates_details filters by level parameter", {
+  # Mixed data: NT level has good dates, regional level has bad dates
+  df <- mk_parl(c("01Jan2020", "BADDATE", "15Feb2021"), 
+                c("31Dec2020", "BADDATE", "28Feb2021"),
+                level = c("NT", "REGIONAL", "NT"))
+  processed <- preprocess_PARLdates(df)
+  
+  # Without level filter: should find NAs
+  all_details <- check_anyNAinPARLdates_details(processed)
+  expect_false(all_details$check_passed)
+  expect_equal(all_details$na_start_count, 1)
+  expect_equal(all_details$na_end_count, 1)
+  
+  # With NT level filter: should pass
+  nt_details <- check_anyNAinPARLdates_details(processed, level = "NT")
+  expect_true(nt_details$check_passed)
+  expect_equal(nt_details$na_start_count, 0)
+  expect_equal(nt_details$na_end_count, 0)
+  
+  # With REGIONAL level filter: should fail
+  reg_details <- check_anyNAinPARLdates_details(processed, level = "REGIONAL")
+  expect_false(reg_details$check_passed)
+  expect_equal(reg_details$na_start_count, 1)
+  expect_equal(reg_details$na_end_count, 1)
+})
+
+test_that("level parameter requires level column", {
+  df <- mk_parl(c("01Jan2020", "15Feb2021"), c("31Dec2020", "28Feb2021"))
+  processed <- preprocess_PARLdates(df)
+  
+  expect_error(
+    check_anyNAinPARLdates(processed, level = "NT"),
+    "PARLLOC is missing 'level' column needed for filtering"
+  )
+  
+  expect_error(
+    check_anyNAinPARLdates_details(processed, level = "NT"),
+    "PARLLOC is missing 'level' column needed for filtering"
+  )
 })

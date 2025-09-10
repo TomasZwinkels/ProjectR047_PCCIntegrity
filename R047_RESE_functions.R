@@ -299,7 +299,7 @@ check_anyNAinRESEdates_details <- function(RESELOC) {
     na_start_rows = which(na_start),
     na_end_rows = which(na_end),
     na_either_rows = which(na_either),
-    rows_with_na_dates = RESELOC[na_either, ],
+    full_rows_with_na_dates = RESELOC[na_either, ],
     total_rows = nrow(RESELOC)
   )
 }
@@ -354,7 +354,7 @@ check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
   if (nrow(RESE) < 2) {
     return(list(
       check_passed = TRUE,
-      near_overlapping_pairs = data.frame(),
+      full_episode_pairs_near_overlapping = data.frame(),
       near_overlap_count = 0,
       affected_persons = character(0),
       tolerance_days = tolerance_days,
@@ -369,7 +369,7 @@ check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
   
   near_pairs <- RECO %>%
     mutate(ROWID = row_number()) %>%
-    inner_join(RECO %>% mutate(ROWID = row_number()), by = "pers_id", suffix = c(".x", ".y")) %>%
+    inner_join(RECO %>% mutate(ROWID = row_number()), by = "pers_id", suffix = c(".x", ".y"), relationship = "many-to-many") %>%
     filter(
       ROWID.x < ROWID.y,
       abs(difftime(res_entry_start_posoxctformat.x, res_entry_start_posoxctformat.y, units = "days")) <= tolerance_days,
@@ -382,7 +382,7 @@ check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
   
   list(
     check_passed = nrow(near_pairs) == 0,
-    near_overlapping_pairs = near_pairs,
+    full_episode_pairs_near_overlapping = near_pairs,
     near_overlap_count = nrow(near_pairs),
     affected_persons = unique(near_pairs$pers_id),
     tolerance_days = tolerance_days,
