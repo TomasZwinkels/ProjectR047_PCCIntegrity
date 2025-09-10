@@ -4,7 +4,7 @@
 # For data fixes, use separate fix scripts
 
 # SETUP
-country_code <- "CH"  # Options: "NL" (Netherlands), "CH" (Switzerland)
+country_code <- "DE"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany)
 
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
@@ -124,6 +124,7 @@ if (checks_passed == total_checks) {
   cat("\nCountry-specific deepdive scripts:\n")
   cat("  - CH_deepdive.R (for Switzerland detailed investigation)\n")
   cat("  - NL_deepdive.R (for Netherlands detailed investigation)\n")
+  cat("  - DE_deepdive.R (for Germany detailed investigation)\n")
   
   cat("\nData fix scripts (in fixing_projects/ folder):\n")
   cat("  - fixing_projects/CH_chamber_function_fixes.R (Swiss chamber political function corrections)\n")
