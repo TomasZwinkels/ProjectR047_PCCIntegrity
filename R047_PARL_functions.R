@@ -100,3 +100,84 @@ check_anyNAinPARLdates_details <- function(PARLLOC, level = NULL) {
     total_rows = nrow(PARLLOC)
   )
 }
+
+###############################################################################
+# Function: check_PARL_parliament_size_meaningful
+# Description: Check if all parliament_size values are meaningful integers (> 0)
+# Returns: TRUE if all parliament_size values are meaningful, FALSE otherwise
+# Optional level parameter to filter by parliament level (e.g., "NT" for national)
+###############################################################################
+check_PARL_parliament_size_meaningful <- function(PARLLOC, level = NULL) {
+  if (!"parliament_size" %in% names(PARLLOC)) {
+    stop("PARLLOC is missing 'parliament_size' column")
+  }
+  
+  if (!is.null(level)) {
+    if (!"level" %in% names(PARLLOC)) {
+      stop("PARLLOC is missing 'level' column needed for filtering")
+    }
+    PARLLOC <- PARLLOC[PARLLOC$level == level, , drop = FALSE]
+  }
+  
+  # Check for NA values
+  has_na <- any(is.na(PARLLOC$parliament_size))
+  
+  # Check for non-numeric values (after converting to numeric)
+  numeric_size <- suppressWarnings(as.numeric(PARLLOC$parliament_size))
+  has_non_numeric <- any(is.na(numeric_size) & !is.na(PARLLOC$parliament_size))
+  
+  # Check for non-positive values
+  has_non_positive <- any(numeric_size <= 0, na.rm = TRUE)
+  
+  # Check for non-integer values
+  has_non_integer <- any(numeric_size != floor(numeric_size), na.rm = TRUE)
+  
+  # Return TRUE only if all checks pass
+  !has_na && !has_non_numeric && !has_non_positive && !has_non_integer
+}
+
+###############################################################################
+# Function: check_PARL_parliament_size_meaningful_details
+# Description: Return detailed information about parliament_size validation issues
+# Returns: List with validation results and problematic rows
+# Optional level parameter to filter by parliament level (e.g., "NT" for national)
+###############################################################################
+check_PARL_parliament_size_meaningful_details <- function(PARLLOC, level = NULL) {
+  if (!"parliament_size" %in% names(PARLLOC)) {
+    stop("PARLLOC is missing 'parliament_size' column")
+  }
+  
+  if (!is.null(level)) {
+    if (!"level" %in% names(PARLLOC)) {
+      stop("PARLLOC is missing 'level' column needed for filtering")
+    }
+    PARLLOC <- PARLLOC[PARLLOC$level == level, , drop = FALSE]
+  }
+  
+  # Analyze different types of issues
+  is_na <- is.na(PARLLOC$parliament_size)
+  
+  # Convert to numeric for further checks
+  numeric_size <- suppressWarnings(as.numeric(PARLLOC$parliament_size))
+  is_non_numeric <- is.na(numeric_size) & !is.na(PARLLOC$parliament_size)
+  is_non_positive <- numeric_size <= 0 & !is.na(numeric_size)
+  is_non_integer <- numeric_size != floor(numeric_size) & !is.na(numeric_size)
+  
+  # Combined problem rows
+  has_problem <- is_na | is_non_numeric | is_non_positive | is_non_integer
+  
+  list(
+    check_passed = !any(has_problem),
+    total_rows = nrow(PARLLOC),
+    na_count = sum(is_na),
+    non_numeric_count = sum(is_non_numeric),
+    non_positive_count = sum(is_non_positive),
+    non_integer_count = sum(is_non_integer),
+    na_rows = which(is_na),
+    non_numeric_rows = which(is_non_numeric),
+    non_positive_rows = which(is_non_positive),
+    non_integer_rows = which(is_non_integer),
+    problem_rows = which(has_problem),
+    full_rows_with_problems = PARLLOC[has_problem, , drop = FALSE]
+  )
+}

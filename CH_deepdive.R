@@ -71,39 +71,45 @@ PARL <- suppressMessages(preprocess_PARLdates(PARL))
 #
 # PARL checks
 #
-cat("=== 2. DATE PREPROCESSING VALIDATION ===\n")
+cat("=== 1. DATE PREPROCESSING VALIDATION ===\n")
 parl_date_details <- check_anyNAinPARLdates_details(PARL, level = "NT")
 names(parl_date_details)
 parl_date_details$check_passed
 parl_date_details$full_rows_with_na_dates
 
+cat("=== 2. PARLIAMENT SIZE VALIDATION ===\n")
+parl_size_details <- check_PARL_parliament_size_meaningful_details(PARL, level = "NT")
+names(parl_size_details)
+parl_size_details$check_passed
+parl_size_details$full_rows_with_problems
+
 #
 # RESE checks
 #
-cat("=== 1. PERSON ID VALIDATION ===\n")
+cat("=== 3. PERSON ID VALIDATION ===\n")
 person_id_details <- check_RESE_persid_in_POLI_details(RESE, POLI)
 names(person_id_details)
 person_id_details$check_passed
 person_id_details$missing_ids
 
-cat("=== 2. RESUME ENTRY ID UNIQUENESS ===\n")
+cat("=== 4. RESUME ENTRY ID UNIQUENESS ===\n")
 entry_id_details <- check_RESE_resentryid_unique_details(RESE)
 names(entry_id_details)
 entry_id_details$check_passed
 entry_id_details$duplicate_ids
 
-cat("=== 3. DATE PREPROCESSING VALIDATION ===\n")
+cat("=== 5. DATE PREPROCESSING VALIDATION ===\n")
 rese_date_details <- check_anyNAinRESEdates_details(RESE)
 names(rese_date_details)
 rese_date_details$check_passed
 rese_date_details$full_rows_with_na_dates
 
-cat("=== 4. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
+cat("=== 6. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
 full_overlap_details <- check_RESE_parlmemeppisodes_anyfulloverlap_details(RESE)
 names(full_overlap_details)
 full_overlap_details$overlapping_episodes
 
-cat("=== 5. NEAR-OVERLAPPING EPISODES ===\n")
+cat("=== 7. NEAR-OVERLAPPING EPISODES ===\n")
 near_overlap_details <- check_RESE_anynear_fulloverlap_details(RESE, tolerance_days = 2)
 names(near_overlap_details)
 near_overlap_details$check_passed

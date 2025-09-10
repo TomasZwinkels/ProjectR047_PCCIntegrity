@@ -87,10 +87,14 @@ cat("All resume entry IDs are unique:", ifelse(entry_id_check, "✅ PASS", "❌ 
 rese_dates_check <- !check_anyNAinRESEdates(RESE)  # Note: function returns TRUE if NA found
 cat("All RESE dates parsed successfully:", ifelse(rese_dates_check, "✅ PASS", "❌ FAIL"), "\n")
 
-parl_dates_check <- !check_anyNAinPARLdates(PARL)  # Note: function returns TRUE if NA found  
+parl_dates_check <- !check_anyNAinPARLdates(PARL, level = "NT")  # Note: function returns TRUE if NA found, only check national level  
 cat("All PARL dates parsed successfully:", ifelse(parl_dates_check, "✅ PASS", "❌ FAIL"), "\n")
 
-# 4. Parliamentary episode overlap checks
+# 4. Parliament size validation
+parl_size_check <- check_PARL_parliament_size_meaningful(PARL, level = "NT")  # Note: function returns TRUE if all sizes are meaningful
+cat("All PARL parliament sizes are meaningful:", ifelse(parl_size_check, "✅ PASS", "❌ FAIL"), "\n")
+
+# 5. Parliamentary episode overlap checks
 full_overlap_check <- !check_RESE_parlmemeppisodes_anyfulloverlap(RESE)  # Note: function returns TRUE if overlaps found
 cat("No fully overlapping parliamentary episodes:", ifelse(full_overlap_check, "✅ PASS", "❌ FAIL"), "\n")
 
@@ -103,7 +107,7 @@ cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PA
 
 cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
-all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, full_overlap_check, near_overlap_check)
+all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 
@@ -118,6 +122,7 @@ if (checks_passed == total_checks) {
   if (!entry_id_check) cat("  - Run deepdive script for duplicate entry ID details\n")
   if (!rese_dates_check) cat("  - Run deepdive script for RESE date parsing details\n")
   if (!parl_dates_check) cat("  - Run deepdive script for PARL date parsing details\n")
+  if (!parl_size_check) cat("  - Run deepdive script for PARL parliament size details\n")
   if (!full_overlap_check) cat("  - Run 'fixing_projects/overlapping_episodes_fixes.R' to generate merged episodes\n")
   if (!near_overlap_check) cat("  - Run deepdive script for near-overlap details\n")
   
