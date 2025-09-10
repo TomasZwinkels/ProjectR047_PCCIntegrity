@@ -390,7 +390,7 @@ test_that("check_RESE_persid_in_POLI_details returns detailed results when all I
   expect_true(result$check_passed)
   expect_equal(length(result$missing_ids), 0)
   expect_equal(result$missing_count, 0)
-  expect_equal(length(result$missing_rows), 0)
+  expect_equal(nrow(result$missing_rows), 0)
   expect_equal(result$total_unique_rese_ids, 3)
   expect_equal(result$total_unique_poli_ids, 5)
 })
@@ -409,6 +409,20 @@ test_that("check_RESE_persid_in_POLI_details returns detailed results when some 
   expect_equal(result$total_unique_poli_ids, 5)
 })
 
+test_that("check_RESE_persid_in_POLI_details handles single-column data frames correctly", {
+  # This test was previously impossible due to R's drop behavior
+  RESE <- data.frame(pers_id = c(1,2,6,6,7), stringsAsFactors = FALSE)
+  POLI <- data.frame(pers_id = 1:5, stringsAsFactors = FALSE)
+  result <- check_RESE_persid_in_POLI_details(RESE, POLI)
+  
+  expect_false(result$check_passed)
+  expect_equal(sort(result$missing_ids), c(6,7))
+  expect_equal(result$missing_count, 2)
+  expect_equal(nrow(result$missing_rows), 3)
+  expect_s3_class(result$missing_rows, "data.frame")  # This is the key improvement!
+  expect_true(all(result$missing_rows$pers_id %in% c(6,7)))
+})
+
 test_that("check_RESE_persid_in_POLI_details works with empty RESE", {
   RESE <- data.frame(pers_id = integer(0))
   POLI <- data.frame(pers_id = 1:5)
@@ -417,7 +431,7 @@ test_that("check_RESE_persid_in_POLI_details works with empty RESE", {
   expect_true(result$check_passed)
   expect_equal(length(result$missing_ids), 0)
   expect_equal(result$missing_count, 0)
-  expect_equal(length(result$missing_rows), 0)
+  expect_equal(nrow(result$missing_rows), 0)
   expect_equal(result$total_unique_rese_ids, 0)
   expect_equal(result$total_unique_poli_ids, 5)
 })
@@ -433,7 +447,7 @@ test_that("check_RESE_resentryid_unique_details returns detailed results when al
   expect_true(result$check_passed)
   expect_equal(length(result$duplicate_ids), 0)
   expect_equal(result$duplicate_count, 0)
-  expect_equal(length(result$duplicate_rows), 0)
+  expect_equal(nrow(result$duplicate_rows), 0)
   expect_equal(result$total_rows, 5)
 })
 
@@ -467,6 +481,20 @@ test_that("check_RESE_resentryid_unique_details detects duplicate NAs", {
   expect_true(is.na(result$duplicate_ids))
   expect_equal(result$duplicate_count, 1)
   expect_equal(nrow(result$duplicate_rows), 2)
+  expect_equal(result$total_rows, 4)
+})
+
+test_that("check_RESE_resentryid_unique_details handles single-column data frames correctly", {
+  # This test was previously impossible due to R's drop behavior
+  RESE <- data.frame(res_entry_id = c(101, 102, 103, 102), stringsAsFactors = FALSE)
+  result <- check_RESE_resentryid_unique_details(RESE)
+  
+  expect_false(result$check_passed)
+  expect_equal(result$duplicate_ids, 102)
+  expect_equal(result$duplicate_count, 1)
+  expect_equal(nrow(result$duplicate_rows), 2)
+  expect_s3_class(result$duplicate_rows, "data.frame")  # This is the key improvement!
+  expect_true(all(result$duplicate_rows$res_entry_id == 102))
   expect_equal(result$total_rows, 4)
 })
 

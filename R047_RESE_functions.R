@@ -228,9 +228,9 @@ check_RESE_persid_in_POLI_details <- function(RESE, POLI) {
   
   # Return rows from RESE that have missing person IDs
   missing_rows <- if(length(missing_ids) > 0) {
-    RESE[RESE$pers_id %in% missing_ids, ]
+    RESE[RESE$pers_id %in% missing_ids, , drop = FALSE]
   } else {
-    RESE[0, ]
+    RESE[0, , drop = FALSE]
   }
   
   list(
@@ -262,9 +262,9 @@ check_RESE_resentryid_unique_details <- function(RESE) {
   
   # Return ALL rows that contain any duplicate ID (not just the duplicated ones)
   duplicate_rows <- if(length(duplicate_ids) > 0) {
-    RESE[RESE$res_entry_id %in% duplicate_ids, ]
+    RESE[RESE$res_entry_id %in% duplicate_ids, , drop = FALSE]
   } else {
-    RESE[0, ]
+    RESE[0, , drop = FALSE]
   }
   
   list(
@@ -299,7 +299,7 @@ check_anyNAinRESEdates_details <- function(RESELOC) {
     na_start_rows = which(na_start),
     na_end_rows = which(na_end),
     na_either_rows = which(na_either),
-    full_rows_with_na_dates = RESELOC[na_either, ],
+    full_rows_with_na_dates = RESELOC[na_either, , drop = FALSE],
     total_rows = nrow(RESELOC)
   )
 }
@@ -310,13 +310,13 @@ check_anyNAinRESEdates_details <- function(RESELOC) {
 # Returns: List with overlapping episodes data and affected persons
 ###############################################################################
 check_RESE_parlmemeppisodes_anyfulloverlap_details <- function(RESE) {
-  parl_episodes <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")), ]  
+  parl_episodes <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")), , drop = FALSE]  
   
   if (nrow(parl_episodes) == 0) {
     return(list(
       check_passed = FALSE,
       warning_message = "No parliamentary membership episodes found",
-      overlapping_episodes = RESE[0, ],
+      overlapping_episodes = RESE[0, , drop = FALSE],
       overlap_count = 0,
       affected_persons = character(0),
       total_parl_episodes = 0
@@ -327,7 +327,7 @@ check_RESE_parlmemeppisodes_anyfulloverlap_details <- function(RESE) {
   overlap_episodes <- parl_episodes[
     duplicated(parl_episodes[, c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")]) |
     duplicated(parl_episodes[, c("pers_id", "res_entry_start_posoxctformat", "res_entry_end_posoxctformat")], fromLast = TRUE),
-  ]
+    , drop = FALSE]
   
   list(
     check_passed = nrow(overlap_episodes) == 0,
@@ -365,7 +365,7 @@ check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
   # Create comparison pairs
   RECO <- RESE[, c("res_entry_id", "pers_id", "res_entry_start", 
                    "res_entry_start_posoxctformat", "res_entry_end", 
-                   "res_entry_end_posoxctformat", "res_entry_raw")]
+                   "res_entry_end_posoxctformat", "res_entry_raw"), drop = FALSE]
   
   near_pairs <- RECO %>%
     mutate(ROWID = row_number()) %>%

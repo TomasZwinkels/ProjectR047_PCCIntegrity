@@ -53,7 +53,7 @@ check_anyNAinPARLdates <- function(PARLLOC, level = NULL) {
     if (!"level" %in% names(PARLLOC)) {
       stop("PARLLOC is missing 'level' column needed for filtering")
     }
-    PARLLOC <- PARLLOC[PARLLOC$level == level, ]
+    PARLLOC <- PARLLOC[PARLLOC$level == level, , drop = FALSE]
   }
   
   any_start_na <- sum(is.na(PARLLOC$leg_period_start_posoxctformat)) > 0
@@ -82,7 +82,7 @@ check_anyNAinPARLdates_details <- function(PARLLOC, level = NULL) {
     if (!"level" %in% names(PARLLOC)) {
       stop("PARLLOC is missing 'level' column needed for filtering")
     }
-    PARLLOC <- PARLLOC[PARLLOC$level == level, ]
+    PARLLOC <- PARLLOC[PARLLOC$level == level, , drop = FALSE]
   }
   
   na_start <- is.na(PARLLOC$leg_period_start_posoxctformat)
@@ -96,7 +96,7 @@ check_anyNAinPARLdates_details <- function(PARLLOC, level = NULL) {
     na_start_rows = which(na_start),
     na_end_rows = which(na_end),
     na_either_rows = which(na_either),
-    full_rows_with_na_dates = PARLLOC[na_either, ],
+    full_rows_with_na_dates = PARLLOC[na_either, , drop = FALSE],
     total_rows = nrow(PARLLOC)
   )
 }
