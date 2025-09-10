@@ -31,11 +31,16 @@ mk_rese <- function(start, end) {
 
 # Helper to build a RESE-like df with parsed columns + required fields
 mk_rese_overlap <- function(political_function, pers_id, start_dates, end_dates) {
+  n <- length(political_function)
   data.frame(
+    res_entry_id = if (n > 0) paste0("entry_", seq_len(n)) else character(0),
     political_function = political_function,
     pers_id = pers_id,
+    res_entry_start = start_dates,
     res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    res_entry_end = end_dates,
     res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
+    res_entry_raw = if (n > 0) paste0("raw_", seq_len(n)) else character(0),
     stringsAsFactors = FALSE
   )
 }
@@ -367,4 +372,305 @@ test_that("returns FALSE on completely empty data", {
     end_dates   = as.Date(character(0))
   )
   expect_false(check_RESE_anynear_fulloverlap(df))
+})
+
+# ==================================================================
+# Block: Unit tests for all _details functions
+# ==================================================================
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_persid_in_POLI_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_persid_in_POLI_details returns detailed results when all IDs match", {
+  RESE <- data.frame(pers_id = c(1,2,3,3), stringsAsFactors = FALSE)
+  POLI <- data.frame(pers_id = 1:5, stringsAsFactors = FALSE)
+  result <- check_RESE_persid_in_POLI_details(RESE, POLI)
+  
+  expect_true(result$check_passed)
+  expect_equal(length(result$missing_ids), 0)
+  expect_equal(result$missing_count, 0)
+  expect_equal(length(result$missing_rows), 0)
+  expect_equal(result$total_unique_rese_ids, 3)
+  expect_equal(result$total_unique_poli_ids, 5)
+})
+
+test_that("check_RESE_persid_in_POLI_details returns detailed results when some IDs missing", {
+  RESE <- data.frame(pers_id = c(1,2,6,6,7), extra_col = letters[1:5], stringsAsFactors = FALSE)
+  POLI <- data.frame(pers_id = 1:5, stringsAsFactors = FALSE)
+  result <- check_RESE_persid_in_POLI_details(RESE, POLI)
+  
+  expect_false(result$check_passed)
+  expect_equal(sort(result$missing_ids), c(6,7))
+  expect_equal(result$missing_count, 2)
+  expect_equal(nrow(result$missing_rows), 3)
+  expect_true(all(result$missing_rows$pers_id %in% c(6,7)))
+  expect_equal(result$total_unique_rese_ids, 4)
+  expect_equal(result$total_unique_poli_ids, 5)
+})
+
+test_that("check_RESE_persid_in_POLI_details works with empty RESE", {
+  RESE <- data.frame(pers_id = integer(0))
+  POLI <- data.frame(pers_id = 1:5)
+  result <- check_RESE_persid_in_POLI_details(RESE, POLI)
+  
+  expect_true(result$check_passed)
+  expect_equal(length(result$missing_ids), 0)
+  expect_equal(result$missing_count, 0)
+  expect_equal(length(result$missing_rows), 0)
+  expect_equal(result$total_unique_rese_ids, 0)
+  expect_equal(result$total_unique_poli_ids, 5)
+})
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_resentryid_unique_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_resentryid_unique_details returns detailed results when all IDs unique", {
+  RESE <- data.frame(res_entry_id = 101:105, stringsAsFactors = FALSE)
+  result <- check_RESE_resentryid_unique_details(RESE)
+  
+  expect_true(result$check_passed)
+  expect_equal(length(result$duplicate_ids), 0)
+  expect_equal(result$duplicate_count, 0)
+  expect_equal(length(result$duplicate_rows), 0)
+  expect_equal(result$total_rows, 5)
+})
+
+test_that("check_RESE_resentryid_unique_details returns detailed results with duplicates", {
+  RESE <- data.frame(res_entry_id = c(101, 102, 103, 102, 104, 103), extra_col = letters[1:6], stringsAsFactors = FALSE)
+  result <- check_RESE_resentryid_unique_details(RESE)
+  
+  expect_false(result$check_passed)
+  expect_equal(sort(result$duplicate_ids), c(102, 103))
+  expect_equal(result$duplicate_count, 2)
+  expect_equal(nrow(result$duplicate_rows), 4)
+  expect_true(all(result$duplicate_rows$res_entry_id %in% c(102, 103)))
+  expect_equal(result$total_rows, 6)
+})
+
+test_that("check_RESE_resentryid_unique_details handles single NA correctly", {
+  RESE <- data.frame(res_entry_id = c(101, NA, 103), extra_col = c("a", "b", "c"), stringsAsFactors = FALSE)
+  result <- check_RESE_resentryid_unique_details(RESE)
+  
+  expect_true(result$check_passed)
+  expect_equal(length(result$duplicate_ids), 0)
+  expect_equal(result$duplicate_count, 0)
+  expect_equal(result$total_rows, 3)
+})
+
+test_that("check_RESE_resentryid_unique_details detects duplicate NAs", {
+  RESE <- data.frame(res_entry_id = c(101, NA, 103, NA), extra_col = letters[1:4], stringsAsFactors = FALSE)
+  result <- check_RESE_resentryid_unique_details(RESE)
+  
+  expect_false(result$check_passed)
+  expect_true(is.na(result$duplicate_ids))
+  expect_equal(result$duplicate_count, 1)
+  expect_equal(nrow(result$duplicate_rows), 2)
+  expect_equal(result$total_rows, 4)
+})
+
+# ------------------------------------------------------------------
+# Tests for: check_anyNAinRESEdates_details()
+# ------------------------------------------------------------------
+
+test_that("check_anyNAinRESEdates_details returns detailed results when no NAs", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("31Dec2020","28Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_anyNAinRESEdates_details(processed)
+  
+  expect_true(result$check_passed)
+  expect_equal(result$na_start_count, 0)
+  expect_equal(result$na_end_count, 0)
+  expect_equal(length(result$na_start_rows), 0)
+  expect_equal(length(result$na_end_rows), 0)
+  expect_equal(length(result$na_either_rows), 0)
+  expect_equal(nrow(result$full_rows_with_na_dates), 0)
+  expect_equal(result$total_rows, 2)
+})
+
+test_that("check_anyNAinRESEdates_details returns detailed results with NAs", {
+  df <- mk_rese(c("BADDATE", "15Feb2021", NA), c("31Dec2020", "NOTADATE", "28Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_anyNAinRESEdates_details(processed)
+  
+  expect_false(result$check_passed)
+  expect_equal(result$na_start_count, 2)
+  expect_equal(result$na_end_count, 1)
+  expect_equal(result$na_start_rows, c(1, 3))
+  expect_equal(result$na_end_rows, 2)
+  expect_equal(sort(result$na_either_rows), c(1, 2, 3))
+  expect_equal(nrow(result$full_rows_with_na_dates), 3)
+  expect_equal(result$total_rows, 3)
+})
+
+test_that("check_anyNAinRESEdates_details errors on missing required columns", {
+  df <- data.frame(start = "01Jan2020", end = "31Dec2020")
+  expect_error(
+    check_anyNAinRESEdates_details(df),
+    "RESELOC is missing columns: res_entry_start_posoxctformat, res_entry_end_posoxctformat"
+  )
+})
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_parlmemeppisodes_anyfulloverlap_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_parlmemeppisodes_anyfulloverlap_details returns detailed results with no overlaps", {
+  df <- mk_rese_overlap(
+    political_function = c("NT_LE-LH_T3_NA_01","NT_LE-LH_T3_NA_01"),
+    pers_id     = c(1,1),
+    start_dates = c("2020-01-01","2020-02-01"),
+    end_dates   = c("2020-12-31","2020-12-31")
+  )
+  result <- check_RESE_parlmemeppisodes_anyfulloverlap_details(df)
+  
+  expect_true(result$check_passed)
+  expect_equal(nrow(result$overlapping_episodes), 0)
+  expect_equal(result$overlap_count, 0)
+  expect_equal(length(result$affected_persons), 0)
+  expect_equal(result$total_parl_episodes, 2)
+})
+
+test_that("check_RESE_parlmemeppisodes_anyfulloverlap_details returns detailed results with overlaps", {
+  df <- mk_rese_overlap(
+    political_function = c("NT_LE-LH_T3_NA_01","NT_LE-LH_T3_NA_01","OTHER"),
+    pers_id     = c(1,1,2),
+    start_dates = c("2020-01-01","2020-01-01","2020-01-01"),
+    end_dates   = c("2020-12-31","2020-12-31","2020-12-31")
+  )
+  result <- check_RESE_parlmemeppisodes_anyfulloverlap_details(df)
+  
+  expect_false(result$check_passed)
+  expect_equal(nrow(result$overlapping_episodes), 2)
+  expect_equal(result$overlap_count, 2)
+  expect_equal(result$affected_persons, 1)
+  expect_equal(result$total_parl_episodes, 2)
+})
+
+test_that("check_RESE_parlmemeppisodes_anyfulloverlap_details handles no parliamentary episodes", {
+  df <- mk_rese_overlap(
+    political_function = c("OTHER","OTHER"),
+    pers_id     = c(1,2),
+    start_dates = c("2020-01-01","2020-01-01"),
+    end_dates   = c("2020-12-31","2020-12-31")
+  )
+  result <- check_RESE_parlmemeppisodes_anyfulloverlap_details(df)
+  
+  expect_false(result$check_passed)
+  expect_equal(result$warning_message, "No parliamentary membership episodes found")
+  expect_equal(nrow(result$overlapping_episodes), 0)
+  expect_equal(result$overlap_count, 0)
+  expect_equal(length(result$affected_persons), 0)
+  expect_equal(result$total_parl_episodes, 0)
+})
+
+test_that("check_RESE_parlmemeppisodes_anyfulloverlap_details works with alternative political function codes", {
+  df <- mk_rese_overlap(
+    political_function = c("NT_LE_T3_NA_01","NT_LE_T3_NA_01"),
+    pers_id     = c(1,1),
+    start_dates = c("2020-01-01","2020-01-01"),
+    end_dates   = c("2020-12-31","2020-12-31")
+  )
+  result <- check_RESE_parlmemeppisodes_anyfulloverlap_details(df)
+  
+  expect_false(result$check_passed)
+  expect_equal(nrow(result$overlapping_episodes), 2)
+  expect_equal(result$total_parl_episodes, 2)
+})
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_anynear_fulloverlap_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_anynear_fulloverlap_details returns detailed results with no near overlaps", {
+  df <- mk_rese_overlap(
+    political_function = rep("NT_LE-LH_T3_NA_01", 2),
+    pers_id     = c(1,1),
+    start_dates = c("2020-01-01","2020-01-05"),
+    end_dates   = c("2020-12-31","2021-01-06")
+  )
+  result <- check_RESE_anynear_fulloverlap_details(df, tolerance_days = 2)
+  
+  expect_true(result$check_passed)
+  expect_equal(nrow(result$full_episode_pairs_near_overlapping), 0)
+  expect_equal(result$near_overlap_count, 0)
+  expect_equal(length(result$affected_persons), 0)
+  expect_equal(result$tolerance_days, 2)
+  expect_equal(result$total_rows, 2)
+})
+
+test_that("check_RESE_anynear_fulloverlap_details returns detailed results with near overlaps", {
+  df <- mk_rese_overlap(
+    political_function = rep("NT_LE-LH_T3_NA_01", 3),
+    pers_id     = c(1,1,2),
+    start_dates = c("2020-01-01","2020-01-02","2020-01-01"),
+    end_dates   = c("2020-12-31","2021-01-01","2020-12-31")
+  )
+  result <- check_RESE_anynear_fulloverlap_details(df, tolerance_days = 2)
+  
+  expect_false(result$check_passed)
+  expect_equal(nrow(result$full_episode_pairs_near_overlapping), 1)
+  expect_equal(result$near_overlap_count, 1)
+  expect_equal(result$affected_persons, 1)
+  expect_equal(result$tolerance_days, 2)
+  expect_equal(result$total_rows, 3)
+  
+  pairs <- result$full_episode_pairs_near_overlapping
+  expect_true("start_diff_days" %in% names(pairs))
+  expect_true("end_diff_days" %in% names(pairs))
+})
+
+test_that("check_RESE_anynear_fulloverlap_details handles single row data", {
+  df <- mk_rese_overlap(
+    political_function = "NT_LE-LH_T3_NA_01",
+    pers_id     = 1,
+    start_dates = "2020-01-01",
+    end_dates   = "2020-12-31"
+  )
+  result <- check_RESE_anynear_fulloverlap_details(df)
+  
+  expect_true(result$check_passed)
+  expect_equal(nrow(result$full_episode_pairs_near_overlapping), 0)
+  expect_equal(result$near_overlap_count, 0)
+  expect_equal(result$total_rows, 1)
+})
+
+test_that("check_RESE_anynear_fulloverlap_details handles empty data", {
+  df <- mk_rese_overlap(
+    political_function = character(0),
+    pers_id     = integer(0),
+    start_dates = as.POSIXct(character(0)),
+    end_dates   = as.POSIXct(character(0))
+  )
+  result <- check_RESE_anynear_fulloverlap_details(df)
+  
+  expect_true(result$check_passed)
+  expect_equal(nrow(result$full_episode_pairs_near_overlapping), 0)
+  expect_equal(result$near_overlap_count, 0)
+  expect_equal(result$total_rows, 0)
+})
+
+test_that("check_RESE_anynear_fulloverlap_details validates tolerance parameter", {
+  df <- mk_rese_overlap(
+    political_function = rep("NT_LE-LH_T3_NA_01", 2),
+    pers_id     = c(1,1),
+    start_dates = c("2020-01-01","2020-01-04"),
+    end_dates   = c("2020-12-31","2021-01-03")
+  )
+  
+  result2 <- check_RESE_anynear_fulloverlap_details(df, tolerance_days = 2)
+  result3 <- check_RESE_anynear_fulloverlap_details(df, tolerance_days = 3)
+  
+  expect_true(result2$check_passed)
+  expect_false(result3$check_passed)
+  expect_equal(result3$tolerance_days, 3)
+})
+
+test_that("check_RESE_anynear_fulloverlap_details errors on missing required columns", {
+  df <- data.frame(id = 1, start = "2020-01-01", end = "2020-12-31")
+  expect_error(
+    check_RESE_anynear_fulloverlap_details(df),
+    "RESE is missing columns:"
+  )
 })
