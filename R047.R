@@ -62,8 +62,8 @@ PARL <- preprocess_PARLdates(PARL)
 resebeforepotentialresentryfilter <- nrow(RESE)
 # SETTING
 # Filter to membership episodes only? Toggle the next line on/off to focus
-# RESE (and thus its checks) on lower house parliamentary membership only
-RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01")),]
+# RESE (and thus its checks) on parliamentary membership only
+RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")),]
 reseafterpotentialresentryfilter <- nrow(RESE)
 
 cat("Further rese filtering details:\n")
