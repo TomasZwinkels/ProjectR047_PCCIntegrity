@@ -208,6 +208,58 @@ test_that("check_anyNAinRESEdates returns TRUE when any parsed date is NA", {
 })
 
 # ==================================================================
+# Block: check_RESE_inverted_dates()
+# ==================================================================
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_inverted_dates()
+# ------------------------------------------------------------------
+
+test_that("returns FALSE when all dates have valid order (start <= end)", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("31Dec2020","28Feb2021"))
+  out <- preprocess_RESEdates(df)
+  expect_false(check_RESE_inverted_dates(out))
+})
+
+test_that("returns TRUE when any end date is before start date", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("31Dec2019","28Feb2021"))  # first row has inverted dates
+  out <- preprocess_RESEdates(df)
+  expect_true(check_RESE_inverted_dates(out))
+})
+
+test_that("returns FALSE when start equals end (same day is valid)", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("01Jan2020","15Feb2021"))
+  out <- preprocess_RESEdates(df)
+  expect_false(check_RESE_inverted_dates(out))
+})
+
+test_that("returns FALSE when all dates are NA (no valid pairs to check)", {
+  df <- mk_rese(c(NA, NA), c(NA, NA))
+  out <- preprocess_RESEdates(df)
+  expect_false(check_RESE_inverted_dates(out))
+})
+
+test_that("ignores rows where either date is NA", {
+  df <- mk_rese(c("01Jan2020", NA, "15Feb2021"), c(NA, "28Feb2021", "28Feb2021"))
+  out <- preprocess_RESEdates(df)
+  expect_false(check_RESE_inverted_dates(out))  # only row 3 has valid pair, and it's correct
+})
+
+test_that("returns FALSE with empty data", {
+  df <- mk_rese(character(0), character(0))
+  out <- preprocess_RESEdates(df)
+  expect_false(check_RESE_inverted_dates(out))
+})
+
+test_that("errors when required columns are missing", {
+  df <- data.frame(start = "01Jan2020", end = "31Dec2020")
+  expect_error(
+    check_RESE_inverted_dates(df),
+    "RESELOC is missing columns:"
+  )
+})
+
+# ==================================================================
 # Block: check_RESE_parlmemeppisodes_anyfulloverlap()
 # ==================================================================
 
@@ -541,6 +593,80 @@ test_that("check_anyNAinRESEdates_details errors on missing required columns", {
 })
 
 # ------------------------------------------------------------------
+# Tests for: check_RESE_inverted_dates_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_inverted_dates_details returns detailed results when no inverted dates", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("31Dec2020","28Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_RESE_inverted_dates_details(processed)
+
+  expect_true(result$check_passed)
+  expect_equal(result$inverted_count, 0)
+  expect_equal(length(result$inverted_row_indices), 0)
+  expect_equal(nrow(result$inverted_rows), 0)
+  expect_equal(result$total_rows, 2)
+  expect_equal(result$valid_date_pairs, 2)
+})
+
+test_that("check_RESE_inverted_dates_details returns detailed results with inverted dates", {
+  df <- mk_rese(c("01Jan2020","15Feb2021","01Mar2021"), c("31Dec2019","28Feb2021","01Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_RESE_inverted_dates_details(processed)
+
+  expect_false(result$check_passed)
+  expect_equal(result$inverted_count, 2)
+  expect_equal(result$inverted_row_indices, c(1, 3))
+  expect_equal(nrow(result$inverted_rows), 2)
+  expect_equal(result$total_rows, 3)
+  expect_equal(result$valid_date_pairs, 3)
+
+  # Check that date_diff_days column was added
+  expect_true("date_diff_days" %in% names(result$inverted_rows))
+  expect_true(all(result$inverted_rows$date_diff_days < 0))  # negative because end < start
+})
+
+test_that("check_RESE_inverted_dates_details handles same-day episodes correctly", {
+  df <- mk_rese(c("01Jan2020","15Feb2021"), c("01Jan2020","15Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_RESE_inverted_dates_details(processed)
+
+  expect_true(result$check_passed)
+  expect_equal(result$inverted_count, 0)
+  expect_equal(result$valid_date_pairs, 2)
+})
+
+test_that("check_RESE_inverted_dates_details handles NA dates correctly", {
+  df <- mk_rese(c("01Jan2020", NA, "15Feb2021"), c(NA, "28Feb2021", "28Feb2021"))
+  processed <- preprocess_RESEdates(df)
+  result <- check_RESE_inverted_dates_details(processed)
+
+  expect_true(result$check_passed)
+  expect_equal(result$inverted_count, 0)
+  expect_equal(result$valid_date_pairs, 1)  # only row 3 has valid pair
+  expect_equal(result$total_rows, 3)
+})
+
+test_that("check_RESE_inverted_dates_details handles empty data", {
+  df <- mk_rese(character(0), character(0))
+  processed <- preprocess_RESEdates(df)
+  result <- check_RESE_inverted_dates_details(processed)
+
+  expect_true(result$check_passed)
+  expect_equal(result$inverted_count, 0)
+  expect_equal(result$total_rows, 0)
+  expect_equal(result$valid_date_pairs, 0)
+})
+
+test_that("check_RESE_inverted_dates_details errors on missing required columns", {
+  df <- data.frame(start = "01Jan2020", end = "31Dec2020")
+  expect_error(
+    check_RESE_inverted_dates_details(df),
+    "RESELOC is missing columns:"
+  )
+})
+
+# ------------------------------------------------------------------
 # Tests for: check_RESE_parlmemeppisodes_anyfulloverlap_details()
 # ------------------------------------------------------------------
 
@@ -700,5 +826,288 @@ test_that("check_RESE_anynear_fulloverlap_details errors on missing required col
   expect_error(
     check_RESE_anynear_fulloverlap_details(df),
     "RESE is missing columns:"
+  )
+})
+
+# ==================================================================
+# Block: check_RESE_episodes_past_death()
+# ==================================================================
+
+# Helper to build a minimal POLI-like df with death dates
+mk_poli_death <- function(pers_id, death_date) {
+  data.frame(
+    pers_id = pers_id,
+    death_date = as.Date(death_date),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Helper to build a RESE-like df with parsed end dates
+mk_rese_death <- function(pers_id, end_dates) {
+  n <- length(pers_id)
+  data.frame(
+    res_entry_id = if (n > 0) paste0("entry_", seq_len(n)) else character(0),
+    pers_id = pers_id,
+    res_entry_start = if (n > 0) rep("01Jan2020", n) else character(0),
+    res_entry_start_posoxctformat = as.POSIXct(rep("2020-01-01", n), tz = "UTC"),
+    res_entry_end = end_dates,
+    res_entry_end_posoxctformat = as.POSIXct(end_dates, tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_episodes_past_death()
+# ------------------------------------------------------------------
+
+test_that("returns FALSE when all episodes end before death date", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P1"),
+    end_dates = c("2020-06-15", "2020-12-31")
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE when episode ends on death date", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2021-01-15"
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns TRUE when episode ends after death date", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2021-01-16"
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE when person has no death date in POLI", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2025-12-31"
+  )
+  POLI <- data.frame(
+    pers_id = "P1",
+    death_date = as.Date(NA),
+    stringsAsFactors = FALSE
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE when RESE person not in POLI deceased list", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2025-12-31"
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P2",  # different person
+    death_date = "2020-01-01"
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE when RESE episode end date is NA", {
+  RESE <- data.frame(
+    pers_id = "P1",
+    res_entry_end_posoxctformat = as.POSIXct(NA),
+    stringsAsFactors = FALSE
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2020-01-15"
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE with empty RESE", {
+  RESE <- mk_rese_death(
+    pers_id = character(0),
+    end_dates = character(0)
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2020-01-15"
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE with empty POLI death dates", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2025-12-31"
+  )
+  POLI <- data.frame(
+    pers_id = character(0),
+    death_date = as.Date(character(0)),
+    stringsAsFactors = FALSE
+  )
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("errors when required columns are missing from RESE", {
+  RESE <- data.frame(pers_id = "P1", end = "2020-12-31")
+  POLI <- mk_poli_death("P1", "2021-01-15")
+  expect_error(
+    check_RESE_episodes_past_death(RESE, POLI),
+    "RESE is missing column res_entry_end_posoxctformat"
+  )
+})
+
+test_that("errors when required columns are missing from POLI", {
+  RESE <- mk_rese_death("P1", "2020-12-31")
+  POLI <- data.frame(pers_id = "P1", death = "2021-01-15")
+  expect_error(
+    check_RESE_episodes_past_death(RESE, POLI),
+    "POLI is missing column death_date"
+  )
+})
+
+test_that("handles multiple persons with mixed death statuses", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P2", "P3"),
+    end_dates = c("2021-01-20", "2020-06-15", "2025-12-31")
+  )
+  POLI <- data.frame(
+    pers_id = c("P1", "P2", "P3"),
+    death_date = as.Date(c("2021-01-15", "2020-12-31", NA)),  # P1 dies before episode, P2 after, P3 alive
+    stringsAsFactors = FALSE
+  )
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))  # P1's episode extends past death
+})
+
+# ------------------------------------------------------------------
+# Tests for: check_RESE_episodes_past_death_details()
+# ------------------------------------------------------------------
+
+test_that("check_RESE_episodes_past_death_details returns detailed results when no issues", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P1"),
+    end_dates = c("2020-06-15", "2020-12-31")
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(nrow(result$episodes_past_death), 0)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(length(result$affected_persons), 0)
+  expect_equal(result$total_rese_rows, 2)
+  expect_equal(result$deceased_persons_in_rese, 1)
+})
+
+test_that("check_RESE_episodes_past_death_details returns detailed results with issues", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P1"),
+    end_dates = c("2021-01-20", "2020-12-31")  # first extends 5 days past death
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(nrow(result$episodes_past_death), 1)
+  expect_equal(result$past_death_count, 1)
+  expect_equal(result$affected_persons, "P1")
+  expect_equal(result$total_rese_rows, 2)
+  expect_equal(result$deceased_persons_in_rese, 1)
+
+  # Check days_past_death column
+  expect_true("days_past_death" %in% names(result$episodes_past_death))
+  expect_equal(result$episodes_past_death$days_past_death, 5)
+})
+
+test_that("check_RESE_episodes_past_death_details handles episode ending on death date", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2021-01-15"
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P1",
+    death_date = "2021-01-15"
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+})
+
+test_that("check_RESE_episodes_past_death_details handles no deceased persons in RESE", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2025-12-31"
+  )
+  POLI <- mk_poli_death(
+    pers_id = "P2",  # different person
+    death_date = "2020-01-01"
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$deceased_persons_in_rese, 0)
+  expect_equal(result$total_rese_rows, 1)
+})
+
+test_that("check_RESE_episodes_past_death_details handles empty POLI death dates", {
+  RESE <- mk_rese_death(
+    pers_id = "P1",
+    end_dates = "2025-12-31"
+  )
+  POLI <- data.frame(
+    pers_id = character(0),
+    death_date = as.Date(character(0)),
+    stringsAsFactors = FALSE
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$deceased_persons_in_rese, 0)
+})
+
+test_that("check_RESE_episodes_past_death_details handles multiple affected persons", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P2", "P3"),
+    end_dates = c("2021-01-20", "2021-02-20", "2020-06-15")  # P1 and P2 past death, P3 ok
+  )
+  POLI <- data.frame(
+    pers_id = c("P1", "P2", "P3"),
+    death_date = as.Date(c("2021-01-15", "2021-02-10", "2020-12-31")),
+    stringsAsFactors = FALSE
+  )
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$past_death_count, 2)
+  expect_equal(sort(result$affected_persons), c("P1", "P2"))
+  expect_equal(result$deceased_persons_in_rese, 3)
+})
+
+test_that("check_RESE_episodes_past_death_details errors on missing required columns", {
+  RESE <- data.frame(pers_id = "P1", end = "2020-12-31")
+  POLI <- mk_poli_death("P1", "2021-01-15")
+  expect_error(
+    check_RESE_episodes_past_death_details(RESE, POLI),
+    "RESE is missing column res_entry_end_posoxctformat"
   )
 })

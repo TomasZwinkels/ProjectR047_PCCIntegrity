@@ -104,16 +104,28 @@ names(rese_date_details)
 rese_date_details$check_passed
 rese_date_details$full_rows_with_na_dates
 
-cat("=== 6. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
+cat("=== 6. INVERTED DATES CHECK ===\n")
+inverted_dates_details <- check_RESE_inverted_dates_details(RESE)
+names(inverted_dates_details)
+inverted_dates_details$check_passed
+inverted_dates_details$inverted_rows
+
+cat("=== 7. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
 full_overlap_details <- check_RESE_parlmemeppisodes_anyfulloverlap_details(RESE)
 names(full_overlap_details)
 full_overlap_details$overlapping_episodes
 
-cat("=== 7. NEAR-OVERLAPPING EPISODES ===\n")
+cat("=== 8. NEAR-OVERLAPPING EPISODES ===\n")
 near_overlap_details <- check_RESE_anynear_fulloverlap_details(RESE, tolerance_days = 2)
 names(near_overlap_details)
 near_overlap_details$check_passed
 near_overlap_details$full_episode_pairs_near_overlapping
+
+cat("=== 9. EPISODES PAST DEATH DATE ===\n")
+past_death_details <- check_RESE_episodes_past_death_details(RESE, POLI)
+names(past_death_details)
+past_death_details$check_passed
+past_death_details$episodes_past_death
 
 # =============================================================================
 # ANOTHER DETAILLED ISSUE INSPECTION: Nationalrat and Staenderat don't seem to have a different political function code.

@@ -115,6 +115,43 @@ check_anyNAinRESEdates <- function(RESELOC) {
   anystartdatesmissing || anyenddatesmissing
 }
 
+###############################################################################
+# Function: check_RESE_inverted_dates
+# Description:
+#   Check whether any RESE episodes have an end date that is before the start
+#   date (inverted dates). This is a data integrity issue.
+#
+# Inputs:
+#   - RESELOC: data.frame with
+#       res_entry_start_posoxctformat (POSIXct)
+#       res_entry_end_posoxctformat   (POSIXct)
+#
+# Returns:
+#   - TRUE  if there are any episodes where end date < start date
+#   - FALSE if all episodes have valid date order (start <= end)
+###############################################################################
+check_RESE_inverted_dates <- function(RESELOC) {
+  req <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req, names(RESELOC))
+  if (length(miss) > 0) {
+    stop("RESELOC is missing columns: ", paste(miss, collapse = ", "))
+  }
+
+  # Compare dates, ignoring rows where either date is NA
+  start_dates <- RESELOC$res_entry_start_posoxctformat
+  end_dates <- RESELOC$res_entry_end_posoxctformat
+
+  # Only check rows where both dates are non-NA
+  valid_rows <- !is.na(start_dates) & !is.na(end_dates)
+
+  if (sum(valid_rows) == 0) {
+    return(FALSE)  # No valid date pairs to check
+
+  }
+
+  any(end_dates[valid_rows] < start_dates[valid_rows])
+}
+
 
 ###############################################################################
 # Function: check_RESE_parlmemeppisodes_anyfulloverlap
@@ -305,6 +342,47 @@ check_anyNAinRESEdates_details <- function(RESELOC) {
 }
 
 ###############################################################################
+# Function: check_RESE_inverted_dates_details
+# Description: Return rows where end date is before start date (inverted dates)
+# Returns: List with inverted_rows data.frame and summary statistics
+###############################################################################
+check_RESE_inverted_dates_details <- function(RESELOC) {
+  req <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req, names(RESELOC))
+  if (length(miss) > 0) {
+    stop("RESELOC is missing columns: ", paste(miss, collapse = ", "))
+  }
+
+  start_dates <- RESELOC$res_entry_start_posoxctformat
+  end_dates <- RESELOC$res_entry_end_posoxctformat
+
+  # Only check rows where both dates are non-NA
+  valid_rows <- !is.na(start_dates) & !is.na(end_dates)
+
+  # Find inverted rows (end < start)
+  inverted <- valid_rows & (end_dates < start_dates)
+
+  # Calculate the difference in days for inverted rows
+  inverted_rows <- RESELOC[inverted, , drop = FALSE]
+  if (nrow(inverted_rows) > 0) {
+    inverted_rows$date_diff_days <- as.numeric(difftime(
+      inverted_rows$res_entry_end_posoxctformat,
+      inverted_rows$res_entry_start_posoxctformat,
+      units = "days"
+    ))
+  }
+
+  list(
+    check_passed = !any(inverted),
+    inverted_count = sum(inverted),
+    inverted_row_indices = which(inverted),
+    inverted_rows = inverted_rows,
+    total_rows = nrow(RESELOC),
+    valid_date_pairs = sum(valid_rows)
+  )
+}
+
+###############################################################################
 # Function: check_RESE_parlmemeppisodes_anyfulloverlap_details
 # Description: Return all overlapping parliamentary episodes as data.frame
 # Returns: List with overlapping episodes data and affected persons
@@ -390,4 +468,177 @@ check_RESE_anynear_fulloverlap_details <- function(RESE, tolerance_days = 2) {
   )
 }
 
+###############################################################################
+# Function: check_RESE_episodes_past_death
+# Description:
+#   Check whether any RESE episodes have an end date that is after the person's
+#   death date (as recorded in POLI). This is a data integrity issue.
+#
+# Inputs:
+#   - RESE: data.frame with pers_id and res_entry_end_posoxctformat (POSIXct)
+#   - POLI: data.frame with pers_id and death_date (Date or POSIXct)
+#
+# Returns:
+#   - TRUE  if there are any episodes where end date > death date
+#   - FALSE if all episodes end on or before death date (or person has no death date)
+###############################################################################
+check_RESE_episodes_past_death <- function(RESE, POLI) {
+  # Validate required columns
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"res_entry_end_posoxctformat" %in% names(RESE)) {
+    stop("RESE is missing column res_entry_end_posoxctformat")
+  }
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+  if (!"death_date" %in% names(POLI)) stop("POLI is missing column death_date")
+
+  # Get death dates from POLI (only those with non-NA and non-empty death dates)
+  # Handle both character strings (where "" means missing) and Date objects
+  has_death_date <- !is.na(POLI$death_date)
+  if (is.character(POLI$death_date)) {
+    has_death_date <- has_death_date & POLI$death_date != ""
+  }
+  death_dates <- POLI[has_death_date, c("pers_id", "death_date"), drop = FALSE]
+
+  if (nrow(death_dates) == 0) {
+    return(FALSE)  # No one has died, nothing to check
+  }
+
+  # Join RESE with death dates
+  merged <- merge(RESE, death_dates, by = "pers_id", all.x = FALSE)
+
+  if (nrow(merged) == 0) {
+    return(FALSE)  # No RESE entries for deceased persons
+  }
+
+  # Filter to rows where episode end date is not NA
+  valid_rows <- !is.na(merged$res_entry_end_posoxctformat)
+  if (sum(valid_rows) == 0) {
+    return(FALSE)  # No valid end dates to check
+  }
+
+  # Convert death date to POSIXct for comparison
+  # Handle both Date objects and PCC-format strings (DDmonYYYY, e.g., "15jan1990")
+  death_vals <- merged$death_date[valid_rows]
+  if (inherits(death_vals, "Date") || inherits(death_vals, "POSIXt")) {
+    death_posix <- as.POSIXct(death_vals, tz = "UTC")
+  } else {
+    # Parse PCC format string
+    death_posix <- as.POSIXct(as.character(death_vals), format = "%d%b%Y", tz = "UTC")
+  }
+  end_dates <- merged$res_entry_end_posoxctformat[valid_rows]
+
+  # Check if any episode end date is after death date
+  any(end_dates > death_posix, na.rm = TRUE)
+}
+
+###############################################################################
+# Function: check_RESE_episodes_past_death_details
+# Description:
+#   Return detailed information about RESE episodes that extend past the
+#   person's death date.
+#
+# Inputs:
+#   - RESE: data.frame with pers_id and res_entry_end_posoxctformat (POSIXct)
+#   - POLI: data.frame with pers_id and death_date (Date or POSIXct)
+#
+# Returns:
+#   - List with:
+#     - check_passed: TRUE if no episodes past death, FALSE otherwise
+#     - episodes_past_death: data.frame of problematic episodes with death date info
+#     - past_death_count: number of episodes extending past death
+#     - affected_persons: unique pers_ids with episodes past death
+#     - total_rese_rows: total number of RESE rows
+#     - deceased_persons_in_rese: number of deceased persons found in RESE
+###############################################################################
+check_RESE_episodes_past_death_details <- function(RESE, POLI) {
+  # Validate required columns
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"res_entry_end_posoxctformat" %in% names(RESE)) {
+    stop("RESE is missing column res_entry_end_posoxctformat")
+  }
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+  if (!"death_date" %in% names(POLI)) stop("POLI is missing column death_date")
+
+  # Get death dates from POLI (only those with non-NA and non-empty death dates)
+  # Handle both character strings (where "" means missing) and Date objects
+  has_death_date <- !is.na(POLI$death_date)
+  if (is.character(POLI$death_date)) {
+    has_death_date <- has_death_date & POLI$death_date != ""
+  }
+  death_dates <- POLI[has_death_date, c("pers_id", "death_date"), drop = FALSE]
+
+  if (nrow(death_dates) == 0) {
+    return(list(
+      check_passed = TRUE,
+      episodes_past_death = RESE[0, , drop = FALSE],
+      past_death_count = 0,
+      affected_persons = character(0),
+      total_rese_rows = nrow(RESE),
+      deceased_persons_in_rese = 0
+    ))
+  }
+
+  # Join RESE with death dates
+  merged <- merge(RESE, death_dates, by = "pers_id", all.x = FALSE)
+
+  if (nrow(merged) == 0) {
+    return(list(
+      check_passed = TRUE,
+      episodes_past_death = RESE[0, , drop = FALSE],
+      past_death_count = 0,
+      affected_persons = character(0),
+      total_rese_rows = nrow(RESE),
+      deceased_persons_in_rese = 0
+    ))
+  }
+
+  deceased_persons_count <- length(unique(merged$pers_id))
+
+  # Filter to rows where episode end date is not NA
+  valid_rows <- !is.na(merged$res_entry_end_posoxctformat)
+
+  if (sum(valid_rows) == 0) {
+    return(list(
+      check_passed = TRUE,
+      episodes_past_death = RESE[0, , drop = FALSE],
+      past_death_count = 0,
+      affected_persons = character(0),
+      total_rese_rows = nrow(RESE),
+      deceased_persons_in_rese = deceased_persons_count
+    ))
+  }
+
+  # Convert death date to POSIXct for comparison
+  # Handle both Date objects and PCC-format strings (DDmonYYYY, e.g., "15jan1990")
+  if (inherits(merged$death_date, "Date") || inherits(merged$death_date, "POSIXt")) {
+    merged$death_posix <- as.POSIXct(merged$death_date, tz = "UTC")
+  } else {
+    # Parse PCC format string
+    merged$death_posix <- as.POSIXct(as.character(merged$death_date),
+                                     format = "%d%b%Y", tz = "UTC")
+  }
+
+  # Find episodes that extend past death date
+  past_death <- valid_rows & (merged$res_entry_end_posoxctformat > merged$death_posix)
+
+  episodes_past_death <- merged[past_death, , drop = FALSE]
+
+  # Add a column showing how many days past death
+  if (nrow(episodes_past_death) > 0) {
+    episodes_past_death$days_past_death <- as.numeric(difftime(
+      episodes_past_death$res_entry_end_posoxctformat,
+      episodes_past_death$death_posix,
+      units = "days"
+    ))
+  }
+
+  list(
+    check_passed = !any(past_death),
+    episodes_past_death = episodes_past_death,
+    past_death_count = sum(past_death),
+    affected_persons = unique(episodes_past_death$pers_id),
+    total_rese_rows = nrow(RESE),
+    deceased_persons_in_rese = deceased_persons_count
+  )
+}
 

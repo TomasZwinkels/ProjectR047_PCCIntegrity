@@ -1,8 +1,9 @@
-# NETHERLANDS DATA QUALITY DEEP DIVE
+# NORWAY DATA QUALITY DEEP DIVE
 # Country-specific detailed investigation of data integrity issues
+# Pre-import verification for Stortinget data
 
 # SETUP
-country_code <- "NL"  # Netherlands focus
+country_code <- "NO"  # Norway focus
 
 # Load required packages
 library(sqldf)
@@ -19,7 +20,7 @@ setwd("/home/tomas/projects/ProjectR047_PCCIntegrity")
 
 # Load custom functions
 source("R047_functions.R")
-source("R047_RESE_functions.R") 
+source("R047_RESE_functions.R")
 source("R047_PARL_functions.R")
 
 # Run unit tests to ensure functions work correctly
@@ -28,36 +29,36 @@ test_file("R047_RESE_unittests.R")
 test_file("R047_PARL_unittests.R")
 
 # LOAD DATA
-# Import PCC datasets
-POLI = read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";")
-RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")
-PARL = read.csv("/home/tomas/projects/PCCdata/PARL.csv", header = TRUE, sep = ";")
+# Import pre-import verification datasets (comma-separated CSVs from R052)
+data_path <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Pre-IMPORT_data_verification/Norway/"
 
-cat("=== NETHERLANDS DATA QUALITY DEEP DIVE ===\n\n")
-cat("Data loaded:\n")
+POLI = read.csv(paste0(data_path, "POLI_import_ready.csv"), header = TRUE)
+RESE = read.csv(paste0(data_path, "RESE_import_ready.csv"), header = TRUE)
+PARL = read.csv(paste0(data_path, "PARL_import_ready.csv"), header = TRUE)
+
+cat("=== NORWAY DATA QUALITY DEEP DIVE ===\n\n")
+cat("Data loaded from Pre-IMPORT_data_verification/Norway/:\n")
 cat("- POLI:", nrow(POLI), "politicians\n")
-cat("- RESE:", nrow(RESE), "resume entries\n") 
-cat("- PARL:", nrow(PARL), "parliament periods\n\n")
-
-# Filter to Netherlands data
-RESE <- RESE[which(RESE$country_abb == country_code), ]
-PARL <- PARL[which(PARL$country_abb == country_code), ]
-
-cat("After filtering to Netherlands:\n")
 cat("- RESE:", nrow(RESE), "resume entries\n")
 cat("- PARL:", nrow(PARL), "parliament periods\n\n")
 
+# NOTE: Unlike other deepdive scripts, no country filtering needed here
+# since the data is already Norway-specific from the pre-import folder
+
 # SETTING
 # Filter to membership episodes only? Toggle the next line on/off to focus
-# on lower house parliamentary membership episodes only
+# on parliamentary membership episodes only (Norway's Storting is unicameral)
+# NT_LE_T3_NA_01 = full representative (Stortingsrepresentant)
+# NT_LE_T3_NA_09 = substitute representative (Vararepresentant)
 resebeforepotentialresentryfilter <- nrow(RESE)
-RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01")), ]
+RESE <- RESE[which(RESE$political_function %in% c("NT_LE_T3_NA_01", "NT_LE_T3_NA_09")), ]
 reseafterpotentialresentryfilter <- nrow(RESE)
 
 cat("Further rese filtering details:\n")
 cat(ifelse(resebeforepotentialresentryfilter == reseafterpotentialresentryfilter,
            "- NO filter applied\n",
-           "- Filter applied to parliamentary membership episodes only\n"))
+           paste0("- Filter applied to parliamentary membership episodes only\n",
+                  "  (includes both Stortingsrepresentant and Vararepresentant)\n")))
 cat("- RESE now has: N=", nrow(RESE), "resume entries\n\n")
 
 # PREPROCESS DATES (suppress validation messages - detailed analysis follows)
@@ -71,7 +72,7 @@ PARL <- suppressMessages(preprocess_PARLdates(PARL))
 #
 # PARL checks
 #
-cat("=== 1. DATE PREPROCESSING VALIDATION ===\n")
+cat("=== 1. DATE PREPROCESSING VALIDATION (PARL) ===\n")
 parl_date_details <- check_anyNAinPARLdates_details(PARL, level = "NT")
 names(parl_date_details)
 parl_date_details$check_passed
@@ -98,7 +99,7 @@ names(entry_id_details)
 entry_id_details$check_passed
 entry_id_details$duplicate_ids
 
-cat("=== 5. DATE PREPROCESSING VALIDATION ===\n")
+cat("=== 5. DATE PREPROCESSING VALIDATION (RESE) ===\n")
 rese_date_details <- check_anyNAinRESEdates_details(RESE)
 names(rese_date_details)
 rese_date_details$check_passed
@@ -109,6 +110,8 @@ inverted_dates_details <- check_RESE_inverted_dates_details(RESE)
 names(inverted_dates_details)
 inverted_dates_details$check_passed
 inverted_dates_details$inverted_rows
+
+RESE[which(RESE$res_entry_start == "30sep1973"),]
 
 cat("=== 7. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
 full_overlap_details <- check_RESE_parlmemeppisodes_anyfulloverlap_details(RESE)
@@ -129,29 +132,57 @@ past_death_details$check_passed
 past_death_details$episodes_past_death
 
 # =============================================================================
-# OTHER NETHERLANDS-SPECIFIC INVESTIGATIONS
+# NORWAY-SPECIFIC INVESTIGATIONS
 # =============================================================================
 
-cat("=== 9. DUTCH DATE FORMAT VALIDATION ===\n")
-# Check date format patterns (Dutch data has some 7-char dates like "aug2012")
+cat("=== 10. REPRESENTATIVE TYPE DISTRIBUTION ===\n")
+# Check distribution of representative types
+RESE$rep_type <- ifelse(RESE$political_function == "NT_LE_T3_NA_01",
+                        "Stortingsrepresentant",
+                        "Vararepresentant")
+cat("Distribution of representative types:\n")
+print(table(RESE$rep_type))
+
+cat("\n=== 11. DATE FORMAT VALIDATION ===\n")
+# Check date format patterns (PCC format: DDmonYYYY, e.g., "30sep2021")
 start_date_lengths <- table(nchar(RESE$res_entry_start))
 end_date_lengths <- table(nchar(RESE$res_entry_end))
-start_date_lengths
-end_date_lengths
+cat("Start date character lengths:\n")
+print(start_date_lengths)
+cat("\nEnd date character lengths:\n")
+print(end_date_lengths)
 
-# Check for 7-character end dates (common in NL data)
-unusual_end_dates <- RESE[which(nchar(RESE$res_entry_end) == 7), ]
-
-cat("=== 10. DATE LOGIC VALIDATION ===\n")
+cat("\n=== 12. DATE LOGIC VALIDATION ===\n")
 # Check if start dates are before end dates
 valid_date_order <- table(RESE$res_entry_start_posoxctformat < RESE$res_entry_end_posoxctformat)
-valid_date_order
+cat("Start date < End date (TRUE = valid):\n")
+print(valid_date_order)
 
-cat("=== 11. GAP DETECTION ===\n")
-# Find episodes that are very close together (1-3 day gaps)
-gap_episodes <- find_gap_episodes(RESE, 1, 3)
+# Episodes where start == end (potentially problematic single-day episodes)
+same_day_episodes <- RESE[which(RESE$res_entry_start_posoxctformat == RESE$res_entry_end_posoxctformat), ]
+if (nrow(same_day_episodes) > 0) {
+  cat("\nWARNING: Found", nrow(same_day_episodes), "episodes where start date equals end date:\n")
+  print(same_day_episodes[, c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end", "rep_type")])
+}
 
-cat("=== 12. SUSPICIOUS DATE DETECTION ===\n")
-# Find dates that don't align well with parliamentary periods
-suspicious_start_dates <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
-suspicious_end_dates <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
+cat("\n=== 13. PARLIAMENT PERIOD COVERAGE ===\n")
+# Check which parliament periods have RESE entries
+rese_parliament_ids <- unique(RESE$parliament_id)
+parl_parliament_ids <- PARL$parliament_id
+missing_in_rese <- setdiff(parl_parliament_ids, rese_parliament_ids)
+missing_in_parl <- setdiff(rese_parliament_ids, parl_parliament_ids)
+
+cat("PARL periods with no RESE entries:",
+    ifelse(length(missing_in_rese) == 0, "NONE (all covered)", paste(missing_in_rese, collapse = ", ")), "\n")
+cat("RESE parliament_ids not in PARL:",
+    ifelse(length(missing_in_parl) == 0, "NONE (all valid)", paste(missing_in_parl, collapse = ", ")), "\n")
+
+# =============================================================================
+# SUMMARY
+# =============================================================================
+cat("\n\n=== SUMMARY ===\n")
+cat("Norway pre-import data quality checks completed.\n")
+cat("Total politicians: ", nrow(POLI), "\n")
+cat("Total resume entries: ", nrow(RESE), "\n")
+cat("Total parliament periods: ", nrow(PARL), "\n")
+cat("Date range: ", min(PARL$leg_period_start), " to ", max(PARL$leg_period_end), "\n")
