@@ -11,6 +11,26 @@ substrRight <- function(x, n) {
 }
 
 ###############################################################################
+# Function: read_csv_with_excel_sep
+#
+# Description:
+#   Reads a CSV file while tolerating the Excel-specific separator preamble
+#   line (for example `sep=,`) that may appear before the actual header row.
+#
+# Inputs:
+#   - file_path: Path to the CSV file
+#   - ...: Additional arguments passed to utils::read.csv()
+#
+# Output:
+#   - A data.frame
+###############################################################################
+read_csv_with_excel_sep <- function(file_path, ...) {
+  first_line <- readLines(file_path, n = 1, warn = FALSE, encoding = "UTF-8")
+  skip_lines <- if (length(first_line) > 0 && grepl("^sep=.", first_line[1])) 1 else 0
+  utils::read.csv(file_path, skip = skip_lines, ...)
+}
+
+###############################################################################
 # Function: merge_episodes
 #
 # Description:

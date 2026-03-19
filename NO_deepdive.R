@@ -32,9 +32,9 @@ test_file("R047_PARL_unittests.R")
 # Import pre-import verification datasets (comma-separated CSVs from R052)
 data_path <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Pre-IMPORT_data_verification/Norway/"
 
-POLI = read.csv(paste0(data_path, "POLI_import_ready.csv"), header = TRUE)
-RESE = read.csv(paste0(data_path, "RESE_import_ready.csv"), header = TRUE)
-PARL = read.csv(paste0(data_path, "PARL_import_ready.csv"), header = TRUE)
+POLI = read_csv_with_excel_sep(paste0(data_path, "POLI_import_ready.csv"), header = TRUE)
+RESE = read_csv_with_excel_sep(paste0(data_path, "RESE_import_ready.csv"), header = TRUE)
+PARL = read_csv_with_excel_sep(paste0(data_path, "PARL_import_ready.csv"), header = TRUE)
 
 cat("=== NORWAY DATA QUALITY DEEP DIVE ===\n\n")
 cat("Data loaded from Pre-IMPORT_data_verification/Norway/:\n")
