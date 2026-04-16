@@ -830,6 +830,53 @@ test_that("check_RESE_anynear_fulloverlap_details errors on missing required col
 })
 
 # ==================================================================
+# Block: parse_pcc_death_date_earliest()
+# ==================================================================
+
+test_that("parses full DDmonYYYY dates", {
+  result <- parse_pcc_death_date_earliest(c("15jun1990", "01jan2000"))
+  expect_equal(result$precision, c("full", "full"))
+  expect_equal(result$earliest,
+               as.POSIXct(c("1990-06-15", "2000-01-01"), tz = "UTC"))
+})
+
+test_that("parses month+year monYYYY dates as 1st of month", {
+  result <- parse_pcc_death_date_earliest(c("jun1990", "dec2005"))
+  expect_equal(result$precision, c("month", "month"))
+  expect_equal(result$earliest,
+               as.POSIXct(c("1990-06-01", "2005-12-01"), tz = "UTC"))
+})
+
+test_that("parses year-only YYYY dates as Jan 1", {
+  result <- parse_pcc_death_date_earliest(c("1990", "2005"))
+  expect_equal(result$precision, c("year", "year"))
+  expect_equal(result$earliest,
+               as.POSIXct(c("1990-01-01", "2005-01-01"), tz = "UTC"))
+})
+
+test_that("handles mixed precision in same vector", {
+  result <- parse_pcc_death_date_earliest(c("15jun1990", "jun1990", "1990"))
+  expect_equal(result$precision, c("full", "month", "year"))
+  expect_equal(result$earliest,
+               as.POSIXct(c("1990-06-15", "1990-06-01", "1990-01-01"), tz = "UTC"))
+})
+
+test_that("handles NA and empty strings", {
+  result <- parse_pcc_death_date_earliest(c(NA, "", "15jun1990"))
+  expect_true(is.na(result$precision[1]))
+  expect_true(is.na(result$precision[2]))
+  expect_equal(result$precision[3], "full")
+  expect_true(is.na(result$earliest[1]))
+  expect_true(is.na(result$earliest[2]))
+})
+
+test_that("handles empty input", {
+  result <- parse_pcc_death_date_earliest(character(0))
+  expect_equal(length(result$earliest), 0)
+  expect_equal(length(result$precision), 0)
+})
+
+# ==================================================================
 # Block: check_RESE_episodes_past_death()
 # ==================================================================
 
@@ -990,6 +1037,67 @@ test_that("handles multiple persons with mixed death statuses", {
   expect_true(check_RESE_episodes_past_death(RESE, POLI))  # P1's episode extends past death
 })
 
+# -- Partial death date tests for boolean function --
+
+# Helper for PCC-string death dates
+mk_poli_death_pcc <- function(pers_id, death_date_str) {
+  data.frame(
+    pers_id = pers_id,
+    death_date = death_date_str,
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("returns FALSE when episode ends before year-only death date", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1989-12-31")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns TRUE when episode ends within year-only death date range", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-06-15")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns TRUE when episode ends after year-only death date", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1991-03-01")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns FALSE when episode ends before month-year death date", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-05-31")
+  POLI <- mk_poli_death_pcc("P1", "jun1990")
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("returns TRUE when episode ends within month-year death date range", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-06-15")
+  POLI <- mk_poli_death_pcc("P1", "jun1990")
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("handles mix of full and partial death dates", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P2"),
+    end_dates = c("2020-06-15", "1989-12-31")
+  )
+  # P1 has full date (episode before death = ok), P2 has year-only (episode before 1990 = ok)
+  POLI <- mk_poli_death_pcc(c("P1", "P2"), c("15dec2020", "1990"))
+  expect_false(check_RESE_episodes_past_death(RESE, POLI))
+})
+
+test_that("flags partial death date even when full-date persons are clean", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P2"),
+    end_dates = c("2020-06-15", "1990-06-15")
+  )
+  # P1 full date ok, P2 year-only with episode inside range → flag
+  POLI <- mk_poli_death_pcc(c("P1", "P2"), c("15dec2020", "1990"))
+  expect_true(check_RESE_episodes_past_death(RESE, POLI))
+})
+
 # ------------------------------------------------------------------
 # Tests for: check_RESE_episodes_past_death_details()
 # ------------------------------------------------------------------
@@ -1008,6 +1116,8 @@ test_that("check_RESE_episodes_past_death_details returns detailed results when 
   expect_true(result$check_passed)
   expect_equal(nrow(result$episodes_past_death), 0)
   expect_equal(result$past_death_count, 0)
+  expect_equal(nrow(result$episodes_partial_death_date), 0)
+  expect_equal(result$partial_death_date_count, 0)
   expect_equal(length(result$affected_persons), 0)
   expect_equal(result$total_rese_rows, 2)
   expect_equal(result$deceased_persons_in_rese, 1)
@@ -1110,4 +1220,88 @@ test_that("check_RESE_episodes_past_death_details errors on missing required col
     check_RESE_episodes_past_death_details(RESE, POLI),
     "RESE is missing column res_entry_end_posoxctformat"
   )
+})
+
+# -- Partial death date tests for details function --
+
+test_that("details: year-only death date, episode ends before → check passes", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1989-12-31")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$partial_death_date_count, 0)
+})
+
+test_that("details: year-only death date, episode ends within range → flagged", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-06-15")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$partial_death_date_count, 1)
+  expect_equal(nrow(result$episodes_partial_death_date), 1)
+  expect_equal(result$episodes_partial_death_date$pers_id, "P1")
+  expect_equal(result$affected_persons, "P1")
+})
+
+test_that("details: year-only death date, episode ends after range → flagged", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1991-03-01")
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$partial_death_date_count, 1)
+})
+
+test_that("details: month-year death date, episode ends before → check passes", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-05-31")
+  POLI <- mk_poli_death_pcc("P1", "jun1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$partial_death_date_count, 0)
+})
+
+test_that("details: month-year death date, episode ends within range → flagged", {
+  RESE <- mk_rese_death(pers_id = "P1", end_dates = "1990-06-15")
+  POLI <- mk_poli_death_pcc("P1", "jun1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$partial_death_date_count, 1)
+})
+
+test_that("details: mix of full violation and partial flag", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P2"),
+    end_dates = c("2021-01-20", "1990-06-15")
+  )
+  POLI <- mk_poli_death_pcc(c("P1", "P2"), c("15jan2021", "1990"))
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$past_death_count, 1)          # P1: full date, definite violation
+  expect_equal(result$partial_death_date_count, 1)   # P2: year-only, flagged
+  expect_equal(sort(result$affected_persons), c("P1", "P2"))
+  # days_past_death only on full violations
+  expect_true("days_past_death" %in% names(result$episodes_past_death))
+  expect_equal(result$episodes_past_death$days_past_death, 5)
+})
+
+test_that("details: partial death date with all episodes safely before → passes", {
+  RESE <- mk_rese_death(
+    pers_id = c("P1", "P1"),
+    end_dates = c("1985-06-15", "1989-11-30")
+  )
+  POLI <- mk_poli_death_pcc("P1", "1990")
+  result <- check_RESE_episodes_past_death_details(RESE, POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$past_death_count, 0)
+  expect_equal(result$partial_death_date_count, 0)
 })

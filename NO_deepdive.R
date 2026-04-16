@@ -33,7 +33,7 @@ test_file("R047_PARL_unittests.R")
 data_path <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Pre-IMPORT_data_verification/Norway/"
 
 POLI = read_csv_with_excel_sep(paste0(data_path, "POLI_import_ready.csv"), header = TRUE)
-RESE = read_csv_with_excel_sep(paste0(data_path, "RESE_import_ready.csv"), header = TRUE)
+RESE = read_csv_with_excel_sep(paste0(data_path, "RESE_parlmem_import_ready.csv"), header = TRUE)
 PARL = read_csv_with_excel_sep(paste0(data_path, "PARL_import_ready.csv"), header = TRUE)
 
 cat("=== NORWAY DATA QUALITY DEEP DIVE ===\n\n")
@@ -53,6 +53,8 @@ cat("- PARL:", nrow(PARL), "parliament periods\n\n")
 resebeforepotentialresentryfilter <- nrow(RESE)
 RESE <- RESE[which(RESE$political_function %in% c("NT_LE_T3_NA_01", "NT_LE_T3_NA_09")), ]
 reseafterpotentialresentryfilter <- nrow(RESE)
+
+table(RESE$political_function)
 
 cat("Further rese filtering details:\n")
 cat(ifelse(resebeforepotentialresentryfilter == reseafterpotentialresentryfilter,
@@ -111,9 +113,7 @@ names(inverted_dates_details)
 inverted_dates_details$check_passed
 inverted_dates_details$inverted_rows
 
-RESE[which(RESE$res_entry_start == "30sep1973"),]
-
-cat("=== 7. PARLIAMENTARY MEMBERSHIP EPISODE OVERLAPS ===\n")
+cat("=== 7. PARLIAMENTARY MEMBERSHIP EPISODE FULL OVERLAPS ===\n")
 full_overlap_details <- check_RESE_parlmemeppisodes_anyfulloverlap_details(RESE)
 names(full_overlap_details)
 full_overlap_details$check_passed
@@ -130,6 +130,8 @@ past_death_details <- check_RESE_episodes_past_death_details(RESE, POLI)
 names(past_death_details)
 past_death_details$check_passed
 past_death_details$episodes_past_death
+past_death_details$partial_death_date_count
+past_death_details$episodes_partial_death_date
 
 # =============================================================================
 # NORWAY-SPECIFIC INVESTIGATIONS

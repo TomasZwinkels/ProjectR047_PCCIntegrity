@@ -126,6 +126,8 @@ past_death_details <- check_RESE_episodes_past_death_details(RESE, POLI)
 names(past_death_details)
 past_death_details$check_passed
 past_death_details$episodes_past_death
+past_death_details$partial_death_date_count
+past_death_details$episodes_partial_death_date
 
 # =============================================================================
 # ANOTHER DETAILLED ISSUE INSPECTION: Nationalrat and Staenderat don't seem to have a different political function code.
