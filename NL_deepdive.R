@@ -19,33 +19,41 @@ setwd("/home/tomas/projects/ProjectR047_PCCIntegrity")
 
 # Load custom functions
 source("R047_functions.R")
-source("R047_RESE_functions.R") 
+source("R047_RESE_functions.R")
 source("R047_PARL_functions.R")
+source("R047_MEME_functions.R")
 
 # Run unit tests to ensure functions work correctly
 test_file("R047_unittests.R")
 test_file("R047_RESE_unittests.R")
 test_file("R047_PARL_unittests.R")
+test_file("R047_MEME_unittests.R")
 
 # LOAD DATA
 # Import PCC datasets
 POLI = read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";")
 RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")
 PARL = read.csv("/home/tomas/projects/PCCdata/PARL.csv", header = TRUE, sep = ";")
+MEME = read.csv("/home/tomas/projects/PCCdata/MEME.csv", header = TRUE, sep = ";")
+PART = read.csv("/home/tomas/projects/PCCdata/PART.csv", header = TRUE, sep = ";")
 
 cat("=== NETHERLANDS DATA QUALITY DEEP DIVE ===\n\n")
 cat("Data loaded:\n")
 cat("- POLI:", nrow(POLI), "politicians\n")
-cat("- RESE:", nrow(RESE), "resume entries\n") 
-cat("- PARL:", nrow(PARL), "parliament periods\n\n")
+cat("- RESE:", nrow(RESE), "resume entries\n")
+cat("- PARL:", nrow(PARL), "parliament periods\n")
+cat("- MEME:", nrow(MEME), "party membership episodes\n")
+cat("- PART:", nrow(PART), "party records\n\n")
 
 # Filter to Netherlands data
 RESE <- RESE[which(RESE$country_abb == country_code), ]
 PARL <- PARL[which(PARL$country_abb == country_code), ]
+MEME <- MEME[which(substr(MEME$pers_id, 1, nchar(country_code)) == country_code), ]
 
 cat("After filtering to Netherlands:\n")
 cat("- RESE:", nrow(RESE), "resume entries\n")
-cat("- PARL:", nrow(PARL), "parliament periods\n\n")
+cat("- PARL:", nrow(PARL), "parliament periods\n")
+cat("- MEME:", nrow(MEME), "party membership episodes\n\n")
 
 # SETTING
 # Filter to membership episodes only? Toggle the next line on/off to focus
@@ -63,6 +71,7 @@ cat("- RESE now has: N=", nrow(RESE), "resume entries\n\n")
 # PREPROCESS DATES (suppress validation messages - detailed analysis follows)
 RESE <- suppressMessages(preprocess_RESEdates(RESE))
 PARL <- suppressMessages(preprocess_PARLdates(PARL))
+MEME <- suppressMessages(preprocess_MEMEdates(MEME))
 
 # =============================================================================
 # DETAILED DATA QUALITY INVESTIGATIONS
@@ -157,3 +166,79 @@ cat("=== 12. SUSPICIOUS DATE DETECTION ===\n")
 # Find dates that don't align well with parliamentary periods
 suspicious_start_dates <- find_suspicious_start_dates(RESE, PARL, threshold_days = 3)
 suspicious_end_dates <- find_suspicious_end_dates(RESE, PARL, threshold_days = 3)
+
+# =============================================================================
+# MEME (PARTY MEMBERSHIP) INVESTIGATIONS
+# =============================================================================
+
+cat("=== 13. MEME PERSON ID VALIDATION ===\n")
+meme_persid_details <- check_MEME_persid_in_POLI_details(MEME, POLI)
+cat("Check passed:", meme_persid_details$check_passed, "\n")
+cat("Missing person IDs:", meme_persid_details$missing_count, "\n")
+if (!meme_persid_details$check_passed) {
+  cat("Person IDs in MEME but not in POLI:\n")
+  print(meme_persid_details$missing_ids)
+}
+
+cat("\n=== 14. MEME PARTY ID REFERENTIAL INTEGRITY ===\n")
+meme_party_details <- check_MEME_partyid_in_PART_details(MEME, PART)
+cat("Check passed:", meme_party_details$check_passed, "\n")
+cat("Missing party IDs:", meme_party_details$missing_count, "\n")
+if (!meme_party_details$check_passed) {
+  cat("Party IDs in MEME but not in PART:\n")
+  print(meme_party_details$missing_ids)
+}
+
+cat("\n=== 15. MEME EPISODE ID UNIQUENESS ===\n")
+meme_dup_details <- check_MEME_memepid_unique_details(MEME)
+cat("Check passed:", meme_dup_details$check_passed, "\n")
+cat("Duplicate IDs found:", meme_dup_details$duplicate_count, "\n")
+if (!meme_dup_details$check_passed) {
+  cat("\nDuplicate memep_id values:\n")
+  print(meme_dup_details$duplicate_ids)
+  cat("\nAll rows with duplicate IDs:\n")
+  print(meme_dup_details$duplicate_rows[, c("memep_id", "pers_id", "party_id",
+                                             "memep_startdate", "memep_enddate")])
+}
+
+cat("\n=== 16. MEME DATE PREPROCESSING VALIDATION ===\n")
+meme_date_details <- check_anyNAinMEMEdates_details(MEME)
+cat("Check passed (no NA start dates):", meme_date_details$check_passed, "\n")
+cat("NA start dates:", meme_date_details$na_start_count, "\n")
+cat("NA end dates (informational, ongoing memberships):", meme_date_details$na_end_count, "\n")
+if (!meme_date_details$check_passed) {
+  cat("\nRows with NA start dates:\n")
+  print(meme_date_details$full_rows_with_na_startdates)
+}
+
+cat("\n=== 17. MEME INVERTED DATES CHECK ===\n")
+meme_inverted_details <- check_MEME_inverted_dates_details(MEME)
+cat("Check passed:", meme_inverted_details$check_passed, "\n")
+cat("Inverted episodes:", meme_inverted_details$inverted_count, "\n")
+if (!meme_inverted_details$check_passed) {
+  cat("\nEpisodes where end < start:\n")
+  print(meme_inverted_details$inverted_rows[, c("memep_id", "pers_id", "party_id",
+                                                  "memep_startdate", "memep_enddate",
+                                                  "date_diff_days")])
+}
+
+cat("\n=== 18. MEME DUPLICATE EPISODES ===\n")
+meme_overlap_details <- check_MEME_anyfulloverlap_details(MEME)
+cat("Check passed:", meme_overlap_details$check_passed, "\n")
+cat("Duplicate episodes:", meme_overlap_details$overlap_count, "\n")
+if (!meme_overlap_details$check_passed) {
+  cat("Affected persons:", paste(meme_overlap_details$affected_persons, collapse = ", "), "\n")
+  cat("\nDuplicate episode rows:\n")
+  print(meme_overlap_details$overlapping_episodes[, c("memep_id", "pers_id", "party_id",
+                                                       "memep_startdate", "memep_enddate")])
+}
+
+cat("\n=== 19. MEME PARTY COVERAGE FOR MPs ===\n")
+meme_coverage_details <- check_MEME_parlmembers_have_party_details(RESE, MEME)
+cat("Check passed:", meme_coverage_details$check_passed, "\n")
+cat("MPs with party data:", meme_coverage_details$total_parlmembers - meme_coverage_details$missing_count,
+    "/", meme_coverage_details$total_parlmembers, "\n")
+if (!meme_coverage_details$check_passed) {
+  cat("MPs missing from MEME:\n")
+  print(meme_coverage_details$missing_ids)
+}

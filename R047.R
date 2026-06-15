@@ -4,7 +4,7 @@
 # For data fixes, use separate fix scripts
 
 # SETUP
-country_code <- "DE"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada)
+country_code <- "US"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United State4s)
 
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
@@ -25,10 +25,12 @@ library(testthat)
 source("R047_functions.R")
 source("R047_RESE_functions.R")
 source("R047_PARL_functions.R")
+source("R047_MEME_functions.R")
 
 test_file("R047_unittests.R")
 test_file("R047_RESE_unittests.R")
 test_file("R047_PARL_unittests.R")
+test_file("R047_MEME_unittests.R")
 
 cat("=== R047 STREAMLINED DATA INTEGRITY CHECKS ===\n")
 cat("Country:", country_code, "\n\n")
@@ -37,23 +39,30 @@ cat("Country:", country_code, "\n\n")
 POLI = read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";")
 RESE = read.csv("/home/tomas/projects/PCCdata/RESE.csv", header = TRUE, sep = ";")
 PARL = read.csv("/home/tomas/projects/PCCdata/PARL.csv", header = TRUE, sep = ";")
+MEME = read.csv("/home/tomas/projects/PCCdata/MEME.csv", header = TRUE, sep = ";")
+PART = read.csv("/home/tomas/projects/PCCdata/PART.csv", header = TRUE, sep = ";")
 
 cat("Data loaded:\n")
 cat("- POLI: N=", nrow(POLI), "politicians\n")
 cat("- RESE: N=", nrow(RESE), "resume entries\n")
-cat("- PARL: N=", nrow(PARL), "parliament periods\n\n")
+cat("- PARL: N=", nrow(PARL), "parliament periods\n")
+cat("- MEME: N=", nrow(MEME), "party membership episodes\n")
+cat("- PART: N=", nrow(PART), "party records\n\n")
 
 # Filter to selected country
 RESE <- RESE[which(RESE$country_abb == country_code), ]
 PARL <- PARL[which(PARL$country_abb == country_code), ]
+MEME <- MEME[which(substr(MEME$pers_id, 1, nchar(country_code)) == country_code), ]
 
 cat("After country filtering:\n")
 cat("- RESE: N=", nrow(RESE), "resume entries\n")
-cat("- PARL: N=", nrow(PARL), "parliament periods\n\n")
+cat("- PARL: N=", nrow(PARL), "parliament periods\n")
+cat("- MEME: N=", nrow(MEME), "party membership episodes\n\n")
 
 # DATA PREPROCESSING
 RESE <- preprocess_RESEdates(RESE)
 PARL <- preprocess_PARLdates(PARL)
+MEME <- preprocess_MEMEdates(MEME)
 
 # =============================================================================
 # CORE INTEGRITY CHECKS - TRUE/FALSE ONLY
@@ -101,13 +110,38 @@ cat("No fully overlapping parliamentary episodes:", ifelse(full_overlap_check, "
 near_overlap_check <- !check_RESE_anynear_fulloverlap(RESE, tolerance_days = 2)  # Note: function returns TRUE if overlaps found
 cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PASS", "❌ FAIL"), "\n")
 
+# 6. MEME integrity checks
+cat("\n--- MEME (Party Membership) Checks ---\n")
+
+meme_persid_check <- check_MEME_persid_in_POLI(MEME, POLI)
+cat("All MEME person IDs exist in POLI:", ifelse(meme_persid_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_partyid_check <- check_MEME_partyid_in_PART(MEME, PART)
+cat("All MEME party IDs exist in PART:", ifelse(meme_partyid_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_memepid_check <- check_MEME_memepid_unique(MEME)
+cat("All MEME episode IDs are unique:", ifelse(meme_memepid_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_dates_check <- !check_anyNAinMEMEdates(MEME)  # Note: function returns TRUE if NA found
+cat("All MEME start dates parsed successfully:", ifelse(meme_dates_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_inverted_check <- !check_MEME_inverted_dates(MEME)  # Note: function returns TRUE if inversions found
+cat("No inverted MEME dates:", ifelse(meme_inverted_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_overlap_check <- !check_MEME_anyfulloverlap(MEME)  # Note: function returns TRUE if overlaps found
+cat("No duplicate MEME episodes:", ifelse(meme_overlap_check, "✅ PASS", "❌ FAIL"), "\n")
+
+meme_party_coverage_check <- check_MEME_parlmembers_have_party(RESE, MEME)
+cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
+
 # =============================================================================
 # SUMMARY REPORT
 # =============================================================================
 
 cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
-all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check)
+all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
+                meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 
