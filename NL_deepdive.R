@@ -131,6 +131,20 @@ names(near_overlap_details)
 near_overlap_details$check_passed
 near_overlap_details$full_episode_pairs_near_overlapping
 
+cat("\n=== 8b. POTENTIAL POLI DUPLICATES (same birthday in same faction) ===\n")
+birthdate_dup_details <- check_RESE_duplicate_birthdates_in_faction_details(
+  RESE, POLI, PARL, MEME, "TK")
+cat("Check passed:", birthdate_dup_details$check_passed, "\n")
+cat("MEME available:", birthdate_dup_details$meme_available, "\n")
+cat("Parliaments checked:", birthdate_dup_details$parliaments_checked, "\n")
+cat("Flagged pairs:", birthdate_dup_details$flagged_count, "\n")
+if (!birthdate_dup_details$check_passed) {
+  unique_pairs <- unique(birthdate_dup_details$flagged_pairs[,
+    c("party_id", "birth_date", "pers_id_1", "name_1", "pers_id_2", "name_2")])
+  cat("\nUnique flagged pairs (potential duplicates):\n")
+  print(unique_pairs, row.names = FALSE)
+}
+
 cat("=== 9. EPISODES PAST DEATH DATE ===\n")
 past_death_details <- check_RESE_episodes_past_death_details(RESE, POLI)
 names(past_death_details)
@@ -243,16 +257,3 @@ if (!meme_coverage_details$check_passed) {
   print(meme_coverage_details$missing_ids)
 }
 
-cat("\n=== 20. POTENTIAL POLI DUPLICATES (same birthday in same faction) ===\n")
-birthdate_dup_details <- check_RESE_duplicate_birthdates_in_faction_details(
-  RESE, POLI, PARL, MEME, "TK")
-cat("Check passed:", birthdate_dup_details$check_passed, "\n")
-cat("MEME available:", birthdate_dup_details$meme_available, "\n")
-cat("Parliaments checked:", birthdate_dup_details$parliaments_checked, "\n")
-cat("Flagged pairs:", birthdate_dup_details$flagged_count, "\n")
-if (!birthdate_dup_details$check_passed) {
-  unique_pairs <- unique(birthdate_dup_details$flagged_pairs[,
-    c("party_id", "birth_date", "pers_id_1", "name_1", "pers_id_2", "name_2")])
-  cat("\nUnique flagged pairs (potential duplicates):\n")
-  print(unique_pairs, row.names = FALSE)
-}
