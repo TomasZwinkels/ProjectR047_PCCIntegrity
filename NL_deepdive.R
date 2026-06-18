@@ -131,9 +131,16 @@ names(near_overlap_details)
 near_overlap_details$check_passed
 near_overlap_details$full_episode_pairs_near_overlapping
 
+# Pairs that have been manually verified as different people (not duplicates)
+verified_not_duplicates <- data.frame(
+  pers_id_1 = c("NL_Suurhoff_Ko_1905"),
+  pers_id_2 = c("NL_Venverloo_Albert_1905"),
+  stringsAsFactors = FALSE
+)
+
 cat("\n=== 8b. POTENTIAL POLI DUPLICATES (same birthday in same faction) ===\n")
 birthdate_dup_details <- check_RESE_duplicate_birthdates_in_faction_details(
-  RESE, POLI, PARL, MEME, "TK")
+  RESE, POLI, PARL, MEME, "TK", verified_pairs = verified_not_duplicates)
 cat("Check passed:", birthdate_dup_details$check_passed, "\n")
 cat("MEME available:", birthdate_dup_details$meme_available, "\n")
 cat("Parliaments checked:", birthdate_dup_details$parliaments_checked, "\n")

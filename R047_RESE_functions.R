@@ -736,13 +736,17 @@ check_RESE_episodes_past_death_details <- function(RESE, POLI) {
 #   - MEME: preprocessed data.frame (needs pers_id, party_id,
 #           memep_startdate_posoxctformat, memep_enddate_posoxctformat)
 #   - assembly_abb_filter: character, which assembly to check (e.g., "TK", "HR")
+#   - verified_pairs: optional data.frame with columns pers_id_1 and pers_id_2,
+#     listing pairs that have been manually verified as different people.
+#     These pairs are excluded from the results (not flagged).
 #
 # Returns:
 #   - TRUE  if any same-birthday pairs found within a faction
 #   - FALSE if no duplicates found, or MEME data unavailable
 ###############################################################################
 check_RESE_duplicate_birthdates_in_faction <- function(RESE, POLI, PARL, MEME,
-                                                        assembly_abb_filter) {
+                                                        assembly_abb_filter,
+                                                        verified_pairs = NULL) {
   # Column validation
   if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
   if (!"res_entry_start_posoxctformat" %in% names(RESE))
@@ -818,7 +822,25 @@ check_RESE_duplicate_birthdates_in_faction <- function(RESE, POLI, PARL, MEME,
       duplicated(person_party[, c("party_id", "birth_date")], fromLast = TRUE),
     ]
 
-    if (nrow(dupes) > 0) return(TRUE)
+    # Exclude verified pairs
+    if (nrow(dupes) > 0 && !is.null(verified_pairs)) {
+      dupe_groups <- split(dupes, paste(dupes$party_id, dupes$birth_date))
+      any_unverified <- FALSE
+      for (g in dupe_groups) {
+        ids <- sort(g$pers_id)
+        for (a in seq_len(length(ids) - 1)) {
+          for (b in (a + 1):length(ids)) {
+            pair_key <- paste(sort(c(ids[a], ids[b])), collapse = "|")
+            vp_keys <- apply(verified_pairs[, c("pers_id_1", "pers_id_2")], 1,
+                             function(r) paste(sort(r), collapse = "|"))
+            if (!pair_key %in% vp_keys) any_unverified <- TRUE
+          }
+        }
+      }
+      if (any_unverified) return(TRUE)
+    } else if (nrow(dupes) > 0) {
+      return(TRUE)
+    }
   }
 
   FALSE
@@ -828,7 +850,8 @@ check_RESE_duplicate_birthdates_in_faction <- function(RESE, POLI, PARL, MEME,
 # Function: check_RESE_duplicate_birthdates_in_faction_details
 ###############################################################################
 check_RESE_duplicate_birthdates_in_faction_details <- function(RESE, POLI, PARL, MEME,
-                                                                assembly_abb_filter) {
+                                                                assembly_abb_filter,
+                                                                verified_pairs = NULL) {
   # Column validation (same as boolean version)
   if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
   if (!"res_entry_start_posoxctformat" %in% names(RESE))
@@ -946,6 +969,17 @@ check_RESE_duplicate_birthdates_in_faction_details <- function(RESE, POLI, PARL,
     unique(do.call(rbind, all_flagged))
   } else {
     empty_result$flagged_pairs
+  }
+
+  # Exclude verified pairs
+  if (nrow(flagged_pairs) > 0 && !is.null(verified_pairs)) {
+    flagged_pairs$pair_key <- apply(
+      flagged_pairs[, c("pers_id_1", "pers_id_2")], 1,
+      function(r) paste(sort(r), collapse = "|"))
+    vp_keys <- apply(verified_pairs[, c("pers_id_1", "pers_id_2")], 1,
+                     function(r) paste(sort(r), collapse = "|"))
+    flagged_pairs <- flagged_pairs[!flagged_pairs$pair_key %in% vp_keys, ]
+    flagged_pairs$pair_key <- NULL
   }
 
   list(

@@ -111,9 +111,16 @@ near_overlap_check <- !check_RESE_anynear_fulloverlap(RESE, tolerance_days = 2) 
 cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PASS", "❌ FAIL"), "\n")
 
 # 6. Potential POLI duplicates (same birthday in same faction, requires MEME)
+# Pairs verified as genuinely different people (not duplicates)
+verified_not_duplicates <- data.frame(
+  pers_id_1 = c("NL_Suurhoff_Ko_1905"),
+  pers_id_2 = c("NL_Venverloo_Albert_1905"),
+  stringsAsFactors = FALSE
+)
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
 birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
-  RESE, POLI, PARL, MEME, assembly_map[country_code])
+  RESE, POLI, PARL, MEME, assembly_map[country_code],
+  verified_pairs = verified_not_duplicates)
 cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
 
 # 7. MEME integrity checks
