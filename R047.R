@@ -110,7 +110,13 @@ cat("No fully overlapping parliamentary episodes:", ifelse(full_overlap_check, "
 near_overlap_check <- !check_RESE_anynear_fulloverlap(RESE, tolerance_days = 2)  # Note: function returns TRUE if overlaps found
 cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PASS", "❌ FAIL"), "\n")
 
-# 6. MEME integrity checks
+# 6. Potential POLI duplicates (same birthday in same faction, requires MEME)
+assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
+birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
+  RESE, POLI, PARL, MEME, assembly_map[country_code])
+cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
+
+# 7. MEME integrity checks
 cat("\n--- MEME (Party Membership) Checks ---\n")
 
 meme_persid_check <- check_MEME_persid_in_POLI(MEME, POLI)
@@ -133,12 +139,6 @@ cat("No duplicate MEME episodes:", ifelse(meme_overlap_check, "✅ PASS", "❌ F
 
 meme_party_coverage_check <- check_MEME_parlmembers_have_party(RESE, MEME)
 cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
-
-# 7. Cross-table: potential POLI duplicates (same birthday in same faction)
-assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
-birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
-  RESE, POLI, PARL, MEME, assembly_map[country_code])
-cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
 
 # =============================================================================
 # SUMMARY REPORT
