@@ -114,9 +114,15 @@ cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PA
 # Pairs verified as genuinely different people (not duplicates)
 verified_not_duplicates <- data.frame(
   pers_id_1 = c("NL_Suurhoff_Ko_1905",
-                 "NL_vanBuel_Ben_1913"),
+                 "NL_vanBuel_Ben_1913",
+                 "NL_Pronk_Jan_1940",
+                 "NL_Esselink_Berry_1944",
+                 "NL_vanderWal_Christianne_1973"),
   pers_id_2 = c("NL_Venverloo_Albert_1905",
-                 "NL_Walburg_Tjebbe_1913"),
+                 "NL_Walburg_Tjebbe_1913",
+                 "NL_Schaefer_Jan_1940",
+                 "NL_vanVoorsttotVoorst_Berend_1944",
+                 "NL_Veltman_Hester_1973"),
   stringsAsFactors = FALSE
 )
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
