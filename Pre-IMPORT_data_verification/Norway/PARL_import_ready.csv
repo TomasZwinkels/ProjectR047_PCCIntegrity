@@ -1,3 +1,4 @@
+﻿sep=,
 "parliament_id","leg_period_start","leg_period_end","level","country_abb","region_abb","leg_period","assembly_name","assembly_abb","coalition_parties","previous_parliament","next_parliament","parliament_size","period_id_original","is_current","parl_source"
 "NO_NT_1913","30sep1913","29sep1916","NT","NO",NA,1,"Stortinget","ST",NA,NA,"NO_NT_1916",123,"1913-16",FALSE,"data.stortinget.no"
 "NO_NT_1916","30sep1916","29sep1918","NT","NO",NA,2,"Stortinget","ST",NA,"NO_NT_1913","NO_NT_1919",123,"1916-18",FALSE,"data.stortinget.no"

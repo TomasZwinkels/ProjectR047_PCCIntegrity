@@ -76,7 +76,19 @@ cat("=== MEME Completeness by Parliament ===\n")
 print(as.data.frame(meme_completeness), row.names = FALSE)
 
 # Plot
+# Parliament start dates for vertical gridlines and year labels
+parl_starts <- sort(meme_completeness$snapshot_day)
+parl_years <- data.frame(
+  date = parl_starts,
+  year = format(parl_starts, "%Y")
+)
+
 p <- ggplot(meme_completeness, aes(x = snapshot_day, y = pct_complete)) +
+  geom_vline(xintercept = parl_starts, color = "gray70", alpha = 0.6, linewidth = 0.3) +
+  geom_text(data = parl_years,
+            aes(x = date, y = 2, label = year),
+            angle = 90, size = 2.5, color = "gray50",
+            hjust = 0, vjust = 0.5) +
   geom_line(color = "purple", linewidth = 0.8) +
   geom_point(color = "purple", size = 2) +
   geom_hline(yintercept = 100, linetype = "dashed", color = "gray50") +
