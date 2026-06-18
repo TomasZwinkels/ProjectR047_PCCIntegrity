@@ -1458,3 +1458,65 @@ test_that("details check_passed is TRUE when no duplicates", {
   expect_equal(result$flagged_count, 0)
   expect_equal(nrow(result$flagged_pairs), 0)
 })
+
+# ------------------------------------------------------------------
+# verified_pairs exclusion
+# ------------------------------------------------------------------
+
+test_that("boolean: verified_pairs excludes confirmed non-duplicates", {
+  d <- mk_birthday_test_data()
+  # A+C share birthday in P1, B+E share birthday in P2
+  # Verify A+C as different people — only B+E should remain flagged
+  vp <- data.frame(pers_id_1 = "A", pers_id_2 = "C", stringsAsFactors = FALSE)
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK", verified_pairs = vp)
+  expect_true(result)  # B+E still flagged
+})
+
+test_that("boolean: returns FALSE when all pairs are verified", {
+  d <- mk_birthday_test_data()
+  vp <- data.frame(
+    pers_id_1 = c("A", "B"),
+    pers_id_2 = c("C", "E"),
+    stringsAsFactors = FALSE
+  )
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK", verified_pairs = vp)
+  expect_false(result)
+})
+
+test_that("boolean: verified_pairs order doesn't matter", {
+  d <- mk_birthday_test_data()
+  # Pass pair as (C, A) instead of (A, C) — should still exclude
+  vp <- data.frame(
+    pers_id_1 = c("C", "E"),
+    pers_id_2 = c("A", "B"),
+    stringsAsFactors = FALSE
+  )
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK", verified_pairs = vp)
+  expect_false(result)
+})
+
+test_that("details: verified_pairs reduces flagged count", {
+  d <- mk_birthday_test_data()
+  vp <- data.frame(pers_id_1 = "A", pers_id_2 = "C", stringsAsFactors = FALSE)
+  result <- check_RESE_duplicate_birthdates_in_faction_details(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK", verified_pairs = vp)
+  expect_false(result$check_passed)  # B+E still flagged
+  expect_equal(result$flagged_count, 1)
+  expect_true("B" %in% c(result$flagged_pairs$pers_id_1, result$flagged_pairs$pers_id_2))
+})
+
+test_that("details: all pairs verified means check passes", {
+  d <- mk_birthday_test_data()
+  vp <- data.frame(
+    pers_id_1 = c("A", "B"),
+    pers_id_2 = c("C", "E"),
+    stringsAsFactors = FALSE
+  )
+  result <- check_RESE_duplicate_birthdates_in_faction_details(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK", verified_pairs = vp)
+  expect_true(result$check_passed)
+  expect_equal(result$flagged_count, 0)
+})
