@@ -1305,3 +1305,156 @@ test_that("details: partial death date with all episodes safely before → passe
   expect_equal(result$past_death_count, 0)
   expect_equal(result$partial_death_date_count, 0)
 })
+
+# ==================================================================
+# Block: tests for duplicate birthdates in faction
+#   Functions under test:
+#     check_RESE_duplicate_birthdates_in_faction()
+#     check_RESE_duplicate_birthdates_in_faction_details()
+# ==================================================================
+
+# Helper: build minimal test data for the birthday duplicate check
+mk_birthday_test_data <- function() {
+  RESE <- data.frame(
+    pers_id = c("A", "B", "C", "D", "E"),
+    political_function = rep("NT_LE-LH_T3_NA_01", 5),
+    res_entry_start_posoxctformat = as.POSIXct(rep("2020-01-01", 5), tz = "UTC"),
+    res_entry_end_posoxctformat = as.POSIXct(rep("2024-12-31", 5), tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  POLI <- data.frame(
+    pers_id = c("A", "B", "C", "D", "E"),
+    birth_date = c("01jan1970", "15mar1980", "01jan1970", "20jun1990", "15mar1980"),
+    last_name = c("Alpha", "Bravo", "Charlie", "Delta", "Echo"),
+    first_name = c("Ann", "Bob", "Carol", "Dave", "Eve"),
+    stringsAsFactors = FALSE
+  )
+  PARL <- data.frame(
+    parliament_id = "PARL_2020",
+    level = "NT",
+    assembly_abb = "TK",
+    leg_period_start_posoxctformat = as.POSIXct("2020-01-01", tz = "UTC"),
+    leg_period_end_posoxctformat = as.POSIXct("2024-12-31", tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  MEME <- data.frame(
+    pers_id = c("A", "B", "C", "D", "E"),
+    party_id = c("P1", "P2", "P1", "P1", "P2"),
+    memep_startdate_posoxctformat = as.POSIXct(rep("2019-01-01", 5), tz = "UTC"),
+    memep_enddate_posoxctformat = as.POSIXct(rep("2025-12-31", 5), tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  list(RESE = RESE, POLI = POLI, PARL = PARL, MEME = MEME)
+}
+
+test_that("detects same birthday within same faction", {
+  d <- mk_birthday_test_data()
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_true(result)
+})
+
+test_that("returns FALSE when no birthday duplicates in any faction", {
+  d <- mk_birthday_test_data()
+  d$POLI$birth_date <- c("01jan1970", "02jan1971", "03jan1972", "04jan1973", "05jan1974")
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_false(result)
+})
+
+test_that("does not flag same birthday in different parties", {
+  d <- mk_birthday_test_data()
+  d$POLI$birth_date <- c("01jan1970", "01jan1970", "02jan1971", "03jan1972", "04jan1973")
+  d$MEME$party_id <- c("P1", "P2", "P1", "P1", "P2")
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_false(result)
+})
+
+test_that("skips gracefully when MEME is empty", {
+  d <- mk_birthday_test_data()
+  empty_meme <- d$MEME[0, ]
+  result <- expect_message(
+    check_RESE_duplicate_birthdates_in_faction(
+      d$RESE, d$POLI, d$PARL, empty_meme, "TK"),
+    "MEME data not available"
+  )
+  expect_false(result)
+})
+
+test_that("returns FALSE when assembly_abb_filter matches no PARL rows", {
+  d <- mk_birthday_test_data()
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "NONEXISTENT")
+  expect_false(result)
+})
+
+test_that("errors when required columns missing", {
+  d <- mk_birthday_test_data()
+  expect_error(check_RESE_duplicate_birthdates_in_faction(
+    d$RESE[, -1], d$POLI, d$PARL, d$MEME, "TK"))
+  expect_error(check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI[, "pers_id", drop = FALSE], d$PARL, d$MEME, "TK"))
+})
+
+test_that("ignores people with NA or empty birth_date", {
+  d <- mk_birthday_test_data()
+  d$POLI$birth_date[3] <- NA_character_
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_true(result)  # B+E still match in P2
+
+  d$POLI$birth_date[5] <- ""
+  result <- check_RESE_duplicate_birthdates_in_faction(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_false(result)  # no more matches
+})
+
+test_that("details returns flagged pairs with correct structure", {
+  d <- mk_birthday_test_data()
+  result <- check_RESE_duplicate_birthdates_in_faction_details(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_false(result$check_passed)
+  expect_true(result$meme_available)
+  expect_equal(result$parliaments_checked, 1)
+  expect_true(result$flagged_count > 0)
+  expect_true(all(c("parliament_id", "party_id", "birth_date",
+                     "pers_id_1", "name_1", "pers_id_2", "name_2")
+                   %in% names(result$flagged_pairs)))
+})
+
+test_that("details returns correct pairs for known duplicates", {
+  d <- mk_birthday_test_data()
+  result <- check_RESE_duplicate_birthdates_in_faction_details(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  pairs <- result$flagged_pairs
+  expect_equal(result$flagged_count, 2)
+  p1_pair <- pairs[pairs$party_id == "P1", ]
+  expect_equal(nrow(p1_pair), 1)
+  expect_true(all(c("A", "C") %in% c(p1_pair$pers_id_1, p1_pair$pers_id_2)))
+  p2_pair <- pairs[pairs$party_id == "P2", ]
+  expect_equal(nrow(p2_pair), 1)
+  expect_true(all(c("B", "E") %in% c(p2_pair$pers_id_1, p2_pair$pers_id_2)))
+})
+
+test_that("details returns empty result when MEME unavailable", {
+  d <- mk_birthday_test_data()
+  result <- expect_message(
+    check_RESE_duplicate_birthdates_in_faction_details(
+      d$RESE, d$POLI, d$PARL, d$MEME[0, ], "TK"),
+    "MEME data not available"
+  )
+  expect_true(result$check_passed)
+  expect_false(result$meme_available)
+  expect_equal(result$flagged_count, 0)
+})
+
+test_that("details check_passed is TRUE when no duplicates", {
+  d <- mk_birthday_test_data()
+  d$POLI$birth_date <- c("01jan1970", "02jan1971", "03jan1972", "04jan1973", "05jan1974")
+  result <- check_RESE_duplicate_birthdates_in_faction_details(
+    d$RESE, d$POLI, d$PARL, d$MEME, "TK")
+  expect_true(result$check_passed)
+  expect_equal(result$flagged_count, 0)
+  expect_equal(nrow(result$flagged_pairs), 0)
+})
