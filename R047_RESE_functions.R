@@ -715,3 +715,245 @@ check_RESE_episodes_past_death_details <- function(RESE, POLI) {
   )
 }
 
+###############################################################################
+# Function: check_RESE_duplicate_birthdates_in_faction
+# Description:
+#   Detect potential POLI duplicates by finding people with the same birth_date
+#   seated in the same parliamentary faction on the first day of any parliament.
+#   Within a faction of ~20-40 people, a shared birthday is statistically very
+#   unlikely and typically indicates the same person entered under two different
+#   pers_ids (e.g., maiden vs married name, nickname vs full name).
+#
+#   Requires MEME data to determine faction membership. If MEME has 0 rows,
+#   the check is skipped with a message and returns FALSE.
+#
+# Inputs:
+#   - RESE: preprocessed data.frame (needs pers_id, political_function,
+#           res_entry_start_posoxctformat, res_entry_end_posoxctformat)
+#   - POLI: data.frame with pers_id, birth_date
+#   - PARL: preprocessed data.frame (needs parliament_id,
+#           leg_period_start_posoxctformat, level, assembly_abb)
+#   - MEME: preprocessed data.frame (needs pers_id, party_id,
+#           memep_startdate_posoxctformat, memep_enddate_posoxctformat)
+#   - assembly_abb_filter: character, which assembly to check (e.g., "TK", "HR")
+#
+# Returns:
+#   - TRUE  if any same-birthday pairs found within a faction
+#   - FALSE if no duplicates found, or MEME data unavailable
+###############################################################################
+check_RESE_duplicate_birthdates_in_faction <- function(RESE, POLI, PARL, MEME,
+                                                        assembly_abb_filter) {
+  # Column validation
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"res_entry_start_posoxctformat" %in% names(RESE))
+    stop("RESE is missing column res_entry_start_posoxctformat (run preprocess_RESEdates first)")
+  if (!"res_entry_end_posoxctformat" %in% names(RESE))
+    stop("RESE is missing column res_entry_end_posoxctformat")
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+  if (!"birth_date" %in% names(POLI)) stop("POLI is missing column birth_date")
+  if (!"parliament_id" %in% names(PARL)) stop("PARL is missing column parliament_id")
+  if (!"leg_period_start_posoxctformat" %in% names(PARL))
+    stop("PARL is missing column leg_period_start_posoxctformat")
+
+  # Check MEME availability
+  if (nrow(MEME) == 0) {
+    message("MEME data not available - skipping faction birthday duplicate check")
+    return(FALSE)
+  }
+  if (!"pers_id" %in% names(MEME)) stop("MEME is missing column pers_id")
+  if (!"party_id" %in% names(MEME)) stop("MEME is missing column party_id")
+  if (!"memep_startdate_posoxctformat" %in% names(MEME))
+    stop("MEME is missing column memep_startdate_posoxctformat")
+
+  # Filter PARL to the target assembly
+  PARL <- PARL[which(PARL$level == "NT" & PARL$assembly_abb == assembly_abb_filter), ]
+  if (nrow(PARL) == 0) return(FALSE)
+
+  # Prepare date columns
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end <- as.Date(RESE$res_entry_end_posoxctformat)
+  meme_start <- as.Date(MEME$memep_startdate_posoxctformat)
+  meme_end <- as.Date(MEME$memep_enddate_posoxctformat)
+
+  # Check each parliament
+  for (i in seq_len(nrow(PARL))) {
+    snapshot <- as.Date(PARL$leg_period_start_posoxctformat[i])
+    if (is.na(snapshot)) next
+
+    # Who is seated?
+    seated_idx <- which(rese_start <= snapshot & rese_end >= snapshot)
+    seated_ids <- unique(RESE$pers_id[seated_idx])
+    if (length(seated_ids) == 0) next
+
+    # What party are they in? (active MEME episode on snapshot day)
+    meme_active_idx <- which(
+      MEME$pers_id %in% seated_ids &
+      meme_start <= snapshot &
+      (meme_end >= snapshot | is.na(meme_end))
+    )
+    if (length(meme_active_idx) == 0) next
+
+    person_party <- data.frame(
+      pers_id = MEME$pers_id[meme_active_idx],
+      party_id = MEME$party_id[meme_active_idx],
+      stringsAsFactors = FALSE
+    )
+
+    # Deduplicate: a person may have multiple MEME episodes for the same party
+    person_party <- person_party[!duplicated(person_party[, c("pers_id", "party_id")]), ]
+
+    # Add birth_date from POLI
+    person_party <- merge(person_party,
+                          POLI[, c("pers_id", "birth_date")],
+                          by = "pers_id", all.x = TRUE)
+
+    # Filter to rows with non-NA birth_date
+    person_party <- person_party[!is.na(person_party$birth_date) &
+                                  person_party$birth_date != "", ]
+    if (nrow(person_party) == 0) next
+
+    # Find different people with same birthday within same party
+    dupes <- person_party[
+      duplicated(person_party[, c("party_id", "birth_date")]) |
+      duplicated(person_party[, c("party_id", "birth_date")], fromLast = TRUE),
+    ]
+
+    if (nrow(dupes) > 0) return(TRUE)
+  }
+
+  FALSE
+}
+
+###############################################################################
+# Function: check_RESE_duplicate_birthdates_in_faction_details
+###############################################################################
+check_RESE_duplicate_birthdates_in_faction_details <- function(RESE, POLI, PARL, MEME,
+                                                                assembly_abb_filter) {
+  # Column validation (same as boolean version)
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  if (!"res_entry_start_posoxctformat" %in% names(RESE))
+    stop("RESE is missing column res_entry_start_posoxctformat")
+  if (!"res_entry_end_posoxctformat" %in% names(RESE))
+    stop("RESE is missing column res_entry_end_posoxctformat")
+  if (!"pers_id" %in% names(POLI)) stop("POLI is missing column pers_id")
+  if (!"birth_date" %in% names(POLI)) stop("POLI is missing column birth_date")
+  if (!"parliament_id" %in% names(PARL)) stop("PARL is missing column parliament_id")
+  if (!"leg_period_start_posoxctformat" %in% names(PARL))
+    stop("PARL is missing column leg_period_start_posoxctformat")
+
+  empty_result <- list(
+    check_passed = TRUE,
+    flagged_pairs = data.frame(
+      parliament_id = character(0), party_id = character(0),
+      birth_date = character(0),
+      pers_id_1 = character(0), name_1 = character(0),
+      pers_id_2 = character(0), name_2 = character(0),
+      stringsAsFactors = FALSE
+    ),
+    flagged_count = 0,
+    parliaments_checked = 0,
+    meme_available = FALSE
+  )
+
+  if (nrow(MEME) == 0) {
+    message("MEME data not available - skipping faction birthday duplicate check")
+    return(empty_result)
+  }
+  if (!"pers_id" %in% names(MEME)) stop("MEME is missing column pers_id")
+  if (!"party_id" %in% names(MEME)) stop("MEME is missing column party_id")
+  if (!"memep_startdate_posoxctformat" %in% names(MEME))
+    stop("MEME is missing column memep_startdate_posoxctformat")
+
+  PARL <- PARL[which(PARL$level == "NT" & PARL$assembly_abb == assembly_abb_filter), ]
+  if (nrow(PARL) == 0) {
+    empty_result$meme_available <- TRUE
+    return(empty_result)
+  }
+
+  # Build name lookup
+  name_lookup <- POLI[, c("pers_id", "last_name", "first_name")]
+
+  # Prepare date columns
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end <- as.Date(RESE$res_entry_end_posoxctformat)
+  meme_start <- as.Date(MEME$memep_startdate_posoxctformat)
+  meme_end <- as.Date(MEME$memep_enddate_posoxctformat)
+
+  all_flagged <- list()
+
+  for (i in seq_len(nrow(PARL))) {
+    pid <- PARL$parliament_id[i]
+    snapshot <- as.Date(PARL$leg_period_start_posoxctformat[i])
+    if (is.na(snapshot)) next
+
+    seated_idx <- which(rese_start <= snapshot & rese_end >= snapshot)
+    seated_ids <- unique(RESE$pers_id[seated_idx])
+    if (length(seated_ids) == 0) next
+
+    meme_active_idx <- which(
+      MEME$pers_id %in% seated_ids &
+      meme_start <= snapshot &
+      (meme_end >= snapshot | is.na(meme_end))
+    )
+    if (length(meme_active_idx) == 0) next
+
+    person_party <- data.frame(
+      pers_id = MEME$pers_id[meme_active_idx],
+      party_id = MEME$party_id[meme_active_idx],
+      stringsAsFactors = FALSE
+    )
+    # Deduplicate: a person may have multiple MEME episodes for the same party
+    person_party <- person_party[!duplicated(person_party[, c("pers_id", "party_id")]), ]
+    person_party <- merge(person_party,
+                          POLI[, c("pers_id", "birth_date")],
+                          by = "pers_id", all.x = TRUE)
+    person_party <- person_party[!is.na(person_party$birth_date) &
+                                  person_party$birth_date != "", ]
+    if (nrow(person_party) == 0) next
+
+    dupes <- person_party[
+      duplicated(person_party[, c("party_id", "birth_date")]) |
+      duplicated(person_party[, c("party_id", "birth_date")], fromLast = TRUE),
+    ]
+
+    if (nrow(dupes) > 0) {
+      # Build pairs
+      dupe_groups <- split(dupes, paste(dupes$party_id, dupes$birth_date))
+      for (g in dupe_groups) {
+        ids <- sort(g$pers_id)
+        # Generate all pairs within the group
+        for (a in seq_len(length(ids) - 1)) {
+          for (b in (a + 1):length(ids)) {
+            n1 <- name_lookup[name_lookup$pers_id == ids[a], ]
+            n2 <- name_lookup[name_lookup$pers_id == ids[b], ]
+            all_flagged[[length(all_flagged) + 1]] <- data.frame(
+              parliament_id = pid,
+              party_id = g$party_id[1],
+              birth_date = g$birth_date[1],
+              pers_id_1 = ids[a],
+              name_1 = if (nrow(n1) > 0) paste(n1$first_name[1], n1$last_name[1]) else NA_character_,
+              pers_id_2 = ids[b],
+              name_2 = if (nrow(n2) > 0) paste(n2$first_name[1], n2$last_name[1]) else NA_character_,
+              stringsAsFactors = FALSE
+            )
+          }
+        }
+      }
+    }
+  }
+
+  flagged_pairs <- if (length(all_flagged) > 0) {
+    unique(do.call(rbind, all_flagged))
+  } else {
+    empty_result$flagged_pairs
+  }
+
+  list(
+    check_passed = nrow(flagged_pairs) == 0,
+    flagged_pairs = flagged_pairs,
+    flagged_count = nrow(flagged_pairs),
+    parliaments_checked = nrow(PARL),
+    meme_available = TRUE
+  )
+}
+

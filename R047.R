@@ -4,7 +4,7 @@
 # For data fixes, use separate fix scripts
 
 # SETUP
-country_code <- "US"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United State4s)
+country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United State4s)
 
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
@@ -134,6 +134,12 @@ cat("No duplicate MEME episodes:", ifelse(meme_overlap_check, "✅ PASS", "❌ F
 meme_party_coverage_check <- check_MEME_parlmembers_have_party(RESE, MEME)
 cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
 
+# 7. Cross-table: potential POLI duplicates (same birthday in same faction)
+assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
+birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
+  RESE, POLI, PARL, MEME, assembly_map[country_code])
+cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
+
 # =============================================================================
 # SUMMARY REPORT
 # =============================================================================
@@ -141,7 +147,8 @@ cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "�
 cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
 all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
-                meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check)
+                meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
+                birthdate_dup_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 
