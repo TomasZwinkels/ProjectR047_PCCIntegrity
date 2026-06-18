@@ -113,8 +113,10 @@ cat("No near-overlapping episodes (2 days):", ifelse(near_overlap_check, "✅ PA
 # 6. Potential POLI duplicates (same birthday in same faction, requires MEME)
 # Pairs verified as genuinely different people (not duplicates)
 verified_not_duplicates <- data.frame(
-  pers_id_1 = c("NL_Suurhoff_Ko_1905"),
-  pers_id_2 = c("NL_Venverloo_Albert_1905"),
+  pers_id_1 = c("NL_Suurhoff_Ko_1905",
+                 "NL_vanBuel_Ben_1913"),
+  pers_id_2 = c("NL_Venverloo_Albert_1905",
+                 "NL_Walburg_Tjebbe_1913"),
   stringsAsFactors = FALSE
 )
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")

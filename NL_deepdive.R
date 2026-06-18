@@ -133,8 +133,10 @@ near_overlap_details$full_episode_pairs_near_overlapping
 
 # Pairs that have been manually verified as different people (not duplicates)
 verified_not_duplicates <- data.frame(
-  pers_id_1 = c("NL_Suurhoff_Ko_1905"),
-  pers_id_2 = c("NL_Venverloo_Albert_1905"),
+  pers_id_1 = c("NL_Suurhoff_Ko_1905",
+                 "NL_vanBuel_Ben_1913"),
+  pers_id_2 = c("NL_Venverloo_Albert_1905",
+                 "NL_Walburg_Tjebbe_1913"),
   stringsAsFactors = FALSE
 )
 
