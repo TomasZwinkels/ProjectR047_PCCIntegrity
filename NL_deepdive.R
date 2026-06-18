@@ -137,11 +137,12 @@ birthdate_dup_details <- check_RESE_duplicate_birthdates_in_faction_details(
 cat("Check passed:", birthdate_dup_details$check_passed, "\n")
 cat("MEME available:", birthdate_dup_details$meme_available, "\n")
 cat("Parliaments checked:", birthdate_dup_details$parliaments_checked, "\n")
-cat("Flagged pairs:", birthdate_dup_details$flagged_count, "\n")
+cat("Flagged pair-parliament instances:", birthdate_dup_details$flagged_count, "\n")
 if (!birthdate_dup_details$check_passed) {
   unique_pairs <- unique(birthdate_dup_details$flagged_pairs[,
     c("party_id", "birth_date", "pers_id_1", "name_1", "pers_id_2", "name_2")])
-  cat("\nUnique flagged pairs (potential duplicates):\n")
+  cat("Unique pairs (deduplicated across parliaments):", nrow(unique_pairs), "\n")
+  cat("\nFlagged pairs (potential duplicates):\n")
   print(unique_pairs, row.names = FALSE)
 }
 
