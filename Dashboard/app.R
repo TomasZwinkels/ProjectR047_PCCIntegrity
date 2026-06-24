@@ -33,6 +33,14 @@ MEME <- suppressMessages(preprocess_MEMEdates(MEME))
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
 all_countries <- sort(intersect(names(assembly_map), unique(POLI$country)))
 
+defaults_file <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/defaults.rds"
+saved <- if (file.exists(defaults_file)) {
+  readRDS(defaults_file)
+} else {
+  list(country = all_countries[1], date_from = as.Date("1946-01-01"),
+       date_to = as.Date("2025-12-31"), tab = "RESE")
+}
+
 poli_vars <- c("last_name", "first_name", "birth_date", "birth_place_raw")
 
 country_labels <- c(
@@ -250,7 +258,7 @@ ui <- fluidPage(
         inputId  = "country_select",
         label    = "Country",
         choices  = all_countries,
-        selected = all_countries[1],
+        selected = saved$country,
         multiple = FALSE
       )
     ),
@@ -258,13 +266,18 @@ ui <- fluidPage(
       dateRangeInput(
         inputId = "date_range",
         label   = "Date range",
-        start   = "1946-01-01",
-        end     = "2025-12-31",
+        start   = saved$date_from,
+        end     = saved$date_to,
         format  = "yyyy-mm-dd"
       )
+    ),
+    column(2,
+      tags$label("\u00a0"),
+      actionButton("set_default", "Set as default", class = "btn-sm btn-default",
+                   style = "display:block; margin-top:1px;")
     )
   ),
-  tabsetPanel(
+  tabsetPanel(id = "main_tabs", selected = saved$tab,
     tabPanel("RESE",
       DT::dataTableOutput("rese_checks"),
       tags$small(style = "color:#666; margin-top:4px; display:block;",
@@ -309,6 +322,16 @@ ui <- fluidPage(
 # ---------------------------------------------------------------------------
 
 server <- function(input, output, session) {
+
+  observeEvent(input$set_default, {
+    saveRDS(list(
+      country   = input$country_select,
+      date_from = input$date_range[1],
+      date_to   = input$date_range[2],
+      tab       = input$main_tabs
+    ), defaults_file)
+    showNotification("Default view saved.", type = "message", duration = 2)
+  })
 
   rese_check_results <- reactive({ run_rese_checks(input$country_select) })
   parl_check_results <- reactive({ run_parl_checks(input$country_select) })
