@@ -5,8 +5,8 @@
 
 # SETUP
 country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United States)
-date_from    <- as.Date("1946-01-01") # currently used only by check_RESE_parlmem_coverage (#16)
-date_to      <- Sys.Date() # currently used only by check_RESE_parlmem_coverage (#16)
+date_from    <- as.Date("1946-01-01") # currently used only by checks #16, #17, #18
+date_to      <- Sys.Date() # currently used only by checks #16, #17, #18
 
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
@@ -170,6 +170,24 @@ if (!parlmem_coverage_check) {
       paste(det$parliaments_no_data$parliament_id, collapse = ", "), "\n")
 }
 
+# 17. RESE coverage on date_from (catches parliament active before range start)
+coverage_datefrom_check <- check_RESE_coverage_at_date(RESE, date_from)
+cat(paste0("\u22651 seated MP in RESE on date_from (", format(date_from, "%Y-%m-%d"), "):"),
+    ifelse(coverage_datefrom_check, "✅ PASS", "❌ FAIL"), "\n")
+if (!coverage_datefrom_check) {
+  cat("  No parliamentary membership entries found active on", format(date_from, "%Y-%m-%d"), "\n")
+  cat("  A parliament that started before this date may be missing from RESE.\n")
+}
+
+# 18. RESE coverage on date_to (catches gap at end of range)
+coverage_dateto_check <- check_RESE_coverage_at_date(RESE, date_to)
+cat(paste0("\u22651 seated MP in RESE on date_to (", format(date_to, "%Y-%m-%d"), "):"),
+    ifelse(coverage_dateto_check, "✅ PASS", "❌ FAIL"), "\n")
+if (!coverage_dateto_check) {
+  cat("  No parliamentary membership entries found active on", format(date_to, "%Y-%m-%d"), "\n")
+  cat("  The most recent parliament may be missing from RESE.\n")
+}
+
 # =============================================================================
 # SUMMARY REPORT
 # =============================================================================
@@ -178,7 +196,7 @@ cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
 all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
                 meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
-                birthdate_dup_check, parlmem_coverage_check)
+                birthdate_dup_check, parlmem_coverage_check, coverage_datefrom_check, coverage_dateto_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 

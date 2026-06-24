@@ -1090,3 +1090,62 @@ check_RESE_parlmem_coverage_details <- function(RESE, PARL, assembly_abb_filter,
     parliaments_no_data = gap_rows
   )
 }
+
+###############################################################################
+# Function: check_RESE_coverage_at_date
+# Description:
+#   Checks whether at least one RESE parliamentary membership entry is active
+#   on a specific date (n_seated > 0). Intended to catch data gaps at the
+#   boundaries of a date range — e.g. a parliament that started before
+#   date_from should still have seated MPs in RESE on date_from itself.
+#
+# Inputs:
+#   - RESE: preprocessed data.frame with
+#       res_entry_start_posoxctformat (POSIXct)
+#       res_entry_end_posoxctformat   (POSIXct)
+#   - date: Date — the specific date to check
+#
+# Returns:
+#   - TRUE  if at least one RESE entry is active on that date
+#   - FALSE if n_seated == 0
+###############################################################################
+check_RESE_coverage_at_date <- function(RESE, date) {
+  req_cols <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req_cols, names(RESE))
+  if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse = ", "))
+
+  date       <- as.Date(date)
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end   <- as.Date(RESE$res_entry_end_posoxctformat)
+
+  n_seated <- sum(rese_start <= date & (is.na(rese_end) | rese_end >= date), na.rm = TRUE)
+  n_seated > 0
+}
+
+###############################################################################
+# Function: check_RESE_coverage_at_date_details
+# Description:
+#   Detailed version of check_RESE_coverage_at_date.
+#
+# Returns: List with
+#   - check_passed   (TRUE/FALSE)
+#   - n_seated       number of RESE entries active on that date
+#   - snapshot_row   1-row data.frame with columns date_checked and n_seated
+###############################################################################
+check_RESE_coverage_at_date_details <- function(RESE, date) {
+  req_cols <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  miss <- setdiff(req_cols, names(RESE))
+  if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse = ", "))
+
+  date       <- as.Date(date)
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end   <- as.Date(RESE$res_entry_end_posoxctformat)
+
+  n_seated <- sum(rese_start <= date & (is.na(rese_end) | rese_end >= date), na.rm = TRUE)
+
+  list(
+    check_passed = n_seated > 0,
+    n_seated     = as.integer(n_seated),
+    snapshot_row = data.frame(date_checked = date, n_seated = as.integer(n_seated))
+  )
+}

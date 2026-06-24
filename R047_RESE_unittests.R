@@ -1609,3 +1609,57 @@ test_that("details: PASS scenario returns gap_count = 0 and empty parliaments_no
   expect_equal(nrow(result$parliaments_no_data), 0L)
   expect_equal(result$parliaments_checked, 2L)
 })
+
+# ==================================================================
+# check_RESE_coverage_at_date  +  _details
+# ==================================================================
+
+mk_at_date_rese <- function(start_dates, end_dates) {
+  data.frame(
+    res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("check_RESE_coverage_at_date: PASS when entry covers date", {
+  rese <- mk_at_date_rese("2000-01-01", "2004-12-31")
+  expect_true(check_RESE_coverage_at_date(rese, as.Date("2002-06-15")))
+})
+
+test_that("check_RESE_coverage_at_date: FAIL when no entry covers date", {
+  rese <- mk_at_date_rese("2000-01-01", "2001-12-31")
+  expect_false(check_RESE_coverage_at_date(rese, as.Date("2002-06-15")))
+})
+
+test_that("check_RESE_coverage_at_date: open-ended episode (NA end) counts as seated", {
+  rese <- mk_at_date_rese("2000-01-01", NA)
+  expect_true(check_RESE_coverage_at_date(rese, as.Date("2020-01-01")))
+})
+
+test_that("check_RESE_coverage_at_date: exact start boundary counts as seated", {
+  rese <- mk_at_date_rese("2000-06-01", "2004-12-31")
+  expect_true(check_RESE_coverage_at_date(rese, as.Date("2000-06-01")))
+})
+
+test_that("check_RESE_coverage_at_date: exact end boundary counts as seated", {
+  rese <- mk_at_date_rese("2000-01-01", "2004-12-31")
+  expect_true(check_RESE_coverage_at_date(rese, as.Date("2004-12-31")))
+})
+
+test_that("details: snapshot_row has n_seated = 0 on FAIL", {
+  rese <- mk_at_date_rese("2000-01-01", "2001-12-31")
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  expect_false(result$check_passed)
+  expect_equal(result$n_seated, 0L)
+  expect_equal(nrow(result$snapshot_row), 1L)
+  expect_equal(result$snapshot_row$n_seated, 0L)
+})
+
+test_that("details: snapshot_row has n_seated > 0 on PASS", {
+  rese <- mk_at_date_rese("2000-01-01", "2004-12-31")
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  expect_true(result$check_passed)
+  expect_true(result$n_seated > 0)
+  expect_equal(nrow(result$snapshot_row), 1L)
+})
