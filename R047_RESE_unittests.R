@@ -1520,3 +1520,92 @@ test_that("details: all pairs verified means check passes", {
   expect_true(result$check_passed)
   expect_equal(result$flagged_count, 0)
 })
+
+# ==================================================================
+# check_RESE_parlmem_coverage  +  _details
+# ==================================================================
+
+# Helper: build minimal RESE and PARL objects with POSIXct date columns
+mk_coverage_rese <- function(start_dates, end_dates) {
+  df <- data.frame(
+    res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  df
+}
+
+mk_coverage_parl <- function(start_dates) {
+  data.frame(
+    parliament_id                  = paste0("P", seq_along(start_dates)),
+    level                          = "NT",
+    assembly_abb                   = "TK",
+    leg_period_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("check_RESE_parlmem_coverage: PASS when all parliaments have data", {
+  rese <- mk_coverage_rese("2000-01-01", "2004-12-31")
+  parl <- mk_coverage_parl(c("2000-01-15", "2002-06-01"))
+  expect_true(check_RESE_parlmem_coverage(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31")))
+})
+
+test_that("check_RESE_parlmem_coverage: FAIL when one parliament has no data", {
+  rese <- mk_coverage_rese("2000-01-01", "2001-12-31")
+  parl <- mk_coverage_parl(c("2000-01-15", "2003-06-01"))  # 2nd snapshot outside RESE range
+  expect_false(check_RESE_parlmem_coverage(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31")))
+})
+
+test_that("check_RESE_parlmem_coverage: PASS (vacuous) when no parliaments in date range", {
+  rese <- mk_coverage_rese("2000-01-01", "2004-12-31")
+  parl <- mk_coverage_parl("1980-01-01")  # outside range
+  expect_true(check_RESE_parlmem_coverage(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31")))
+})
+
+test_that("check_RESE_parlmem_coverage: parliament on date_from boundary is included", {
+  rese <- mk_coverage_rese("1990-01-01", "2004-12-31")  # RESE covers the boundary date
+  parl <- mk_coverage_parl("1990-01-01")  # exactly on date_from
+  expect_true(check_RESE_parlmem_coverage(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31")))
+})
+
+test_that("check_RESE_parlmem_coverage: parliament on date_to boundary is included", {
+  rese <- mk_coverage_rese("2000-01-01", "2025-12-31")
+  parl <- mk_coverage_parl("2025-12-31")  # exactly on date_to
+  expect_true(check_RESE_parlmem_coverage(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31")))
+})
+
+test_that("details: parliaments_no_data contains the correct PARL row", {
+  rese <- mk_coverage_rese("2000-01-01", "2001-12-31")
+  parl <- mk_coverage_parl(c("2000-01-15", "2003-06-01"))  # P2 has no data
+  result <- check_RESE_parlmem_coverage_details(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31"))
+  expect_false(result$check_passed)
+  expect_equal(result$gap_count, 1L)
+  expect_equal(result$parliaments_no_data$parliament_id, "P2")
+  expect_equal(result$parliaments_no_data$n_seated, 0L)
+})
+
+test_that("details: gap_count matches nrow(parliaments_no_data)", {
+  rese <- mk_coverage_rese("2000-06-01", "2000-07-01")  # very narrow window
+  parl <- mk_coverage_parl(c("1999-01-01", "2001-01-01", "2003-01-01"))  # all miss
+  result <- check_RESE_parlmem_coverage_details(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31"))
+  expect_equal(result$gap_count, nrow(result$parliaments_no_data))
+})
+
+test_that("details: PASS scenario returns gap_count = 0 and empty parliaments_no_data", {
+  rese <- mk_coverage_rese("2000-01-01", "2004-12-31")
+  parl <- mk_coverage_parl(c("2000-01-15", "2002-06-01"))
+  result <- check_RESE_parlmem_coverage_details(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31"))
+  expect_true(result$check_passed)
+  expect_equal(result$gap_count, 0L)
+  expect_equal(nrow(result$parliaments_no_data), 0L)
+  expect_equal(result$parliaments_checked, 2L)
+})

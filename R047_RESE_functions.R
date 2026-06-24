@@ -991,3 +991,102 @@ check_RESE_duplicate_birthdates_in_faction_details <- function(RESE, POLI, PARL,
   )
 }
 
+###############################################################################
+# Function: check_RESE_parlmem_coverage
+# Description:
+#   For every parliament whose start date falls within [date_from, date_to],
+#   check that at least one RESE parliamentary membership entry is active on
+#   that day (i.e. n_seated > 0). Returns FALSE if any parliament in range
+#   has zero seated MPs in RESE — a "data cliff" equivalent to the orange line
+#   in the POLI completeness graph.
+#
+# Inputs:
+#   - RESE: preprocessed data.frame with
+#       res_entry_start_posoxctformat (POSIXct)
+#       res_entry_end_posoxctformat   (POSIXct)
+#   - PARL: preprocessed data.frame with
+#       leg_period_start_posoxctformat (POSIXct), level, assembly_abb
+#   - assembly_abb_filter: character — which assembly to check (e.g. "TK")
+#   - date_from, date_to: Date — range of parliament start dates to include
+#
+# Returns:
+#   - TRUE  if every parliament start date in range has >= 1 seated MP
+#   - TRUE  if no parliaments fall within the date range (vacuous)
+#   - FALSE if any parliament start date in range has 0 seated MPs
+###############################################################################
+check_RESE_parlmem_coverage <- function(RESE, PARL, assembly_abb_filter,
+                                        date_from, date_to) {
+  req_rese <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  req_parl <- c("leg_period_start_posoxctformat", "level", "assembly_abb")
+  miss <- c(setdiff(req_rese, names(RESE)), setdiff(req_parl, names(PARL)))
+  if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse = ", "))
+
+  parl_sub <- PARL[PARL$level == "NT" & PARL$assembly_abb == assembly_abb_filter, ]
+  snapshots <- as.Date(parl_sub$leg_period_start_posoxctformat)
+  in_range  <- !is.na(snapshots) & snapshots >= as.Date(date_from) & snapshots <= as.Date(date_to)
+  parl_sub  <- parl_sub[in_range, ]
+
+  if (nrow(parl_sub) == 0) return(TRUE)
+
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end   <- as.Date(RESE$res_entry_end_posoxctformat)
+
+  for (i in seq_len(nrow(parl_sub))) {
+    snapshot <- as.Date(parl_sub$leg_period_start_posoxctformat[i])
+    n_seated <- sum(rese_start <= snapshot & (is.na(rese_end) | rese_end >= snapshot),
+                    na.rm = TRUE)
+    if (n_seated == 0) return(FALSE)
+  }
+  TRUE
+}
+
+###############################################################################
+# Function: check_RESE_parlmem_coverage_details
+# Description:
+#   Detailed version of check_RESE_parlmem_coverage. Returns which parliament
+#   start dates within the date range had zero seated MPs in RESE.
+#
+# Returns: List with
+#   - check_passed           (TRUE/FALSE)
+#   - parliaments_checked    number of parliament start dates in range
+#   - gap_count              number with n_seated == 0
+#   - parliaments_no_data    data.frame of PARL rows with gap + n_seated column
+###############################################################################
+check_RESE_parlmem_coverage_details <- function(RESE, PARL, assembly_abb_filter,
+                                                 date_from, date_to) {
+  req_rese <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
+  req_parl <- c("leg_period_start_posoxctformat", "level", "assembly_abb")
+  miss <- c(setdiff(req_rese, names(RESE)), setdiff(req_parl, names(PARL)))
+  if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse = ", "))
+
+  parl_sub <- PARL[PARL$level == "NT" & PARL$assembly_abb == assembly_abb_filter, ]
+  snapshots <- as.Date(parl_sub$leg_period_start_posoxctformat)
+  in_range  <- !is.na(snapshots) & snapshots >= as.Date(date_from) & snapshots <= as.Date(date_to)
+  parl_sub  <- parl_sub[in_range, , drop = FALSE]
+
+  empty <- list(
+    check_passed        = TRUE,
+    parliaments_checked = 0L,
+    gap_count           = 0L,
+    parliaments_no_data = parl_sub[0, , drop = FALSE]
+  )
+  if (nrow(parl_sub) == 0) return(empty)
+
+  rese_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  rese_end   <- as.Date(RESE$res_entry_end_posoxctformat)
+
+  n_seated_vec <- vapply(seq_len(nrow(parl_sub)), function(i) {
+    snapshot <- as.Date(parl_sub$leg_period_start_posoxctformat[i])
+    sum(rese_start <= snapshot & (is.na(rese_end) | rese_end >= snapshot), na.rm = TRUE)
+  }, integer(1))
+
+  gap_rows <- parl_sub[n_seated_vec == 0, , drop = FALSE]
+  gap_rows$n_seated <- rep(0L, nrow(gap_rows))
+
+  list(
+    check_passed        = nrow(gap_rows) == 0,
+    parliaments_checked = nrow(parl_sub),
+    gap_count           = nrow(gap_rows),
+    parliaments_no_data = gap_rows
+  )
+}

@@ -1,4 +1,4 @@
-for (pkg in c("shiny", "dplyr", "ggplot2", "DT")) {
+for (pkg in c("shiny", "dplyr", "ggplot2", "DT", "testthat")) {
   if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
   library(pkg, character.only = TRUE)
 }
@@ -6,6 +6,10 @@ for (pkg in c("shiny", "dplyr", "ggplot2", "DT")) {
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
+
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_unittests.R")
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_unittests.R")
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_unittests.R")
 
 # Load data once at startup
 POLI <- read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";") |>
@@ -38,7 +42,7 @@ saved <- if (file.exists(defaults_file)) {
   readRDS(defaults_file)
 } else {
   list(country = all_countries[1], date_from = as.Date("1946-01-01"),
-       date_to = as.Date("2025-12-31"), tab = "RESE")
+       date_to = as.Date("2025-12-31"), tab = "RESE_MP")
 }
 
 poli_vars <- c("last_name", "first_name", "birth_date", "birth_place_raw")
@@ -108,7 +112,7 @@ checks_table <- function(labels, results) {
   )
 }
 
-run_rese_checks <- function(cc) {
+run_rese_checks <- function(cc, date_from, date_to) {
   rese_mp <- suppressMessages(preprocess_RESEdates(
     RESE[RESE$country_abb == cc, ]
   ))
@@ -121,7 +125,8 @@ run_rese_checks <- function(cc) {
     "All RESE dates parsed successfully",
     "No fully overlapping parl. episodes",
     "No near-overlapping episodes (\u22642 days)",
-    "No same-birthday duplicates in factions"
+    "No same-birthday duplicates in factions",
+    "All parliaments in date range have membership data"
   )
   details <- list(
     check_RESE_persid_in_POLI_details(rese_mp, POLI),
@@ -131,7 +136,9 @@ run_rese_checks <- function(cc) {
     check_RESE_anynear_fulloverlap_details(rese_mp, tolerance_days = 2),
     check_RESE_duplicate_birthdates_in_faction_details(
       rese_mp, POLI, PARL, MEME, assembly_map[[cc]],
-      verified_pairs = verified_not_duplicates)
+      verified_pairs = verified_not_duplicates),
+    check_RESE_parlmem_coverage_details(
+      rese_mp, PARL, assembly_map[[cc]], date_from, date_to)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -141,7 +148,8 @@ run_rese_checks <- function(cc) {
 
 rese_detail_keys <- c(
   "missing_rows", "duplicate_rows", "full_rows_with_na_dates",
-  "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs"
+  "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs",
+  "parliaments_no_data"
 )
 
 run_parl_checks <- function(cc) {
@@ -278,7 +286,7 @@ ui <- fluidPage(
     )
   ),
   tabsetPanel(id = "main_tabs", selected = saved$tab,
-    tabPanel("RESE",
+    tabPanel("RESE_MP",
       DT::dataTableOutput("rese_checks"),
       tags$small(style = "color:#666; margin-top:4px; display:block;",
         "Checks run on country-filtered RESE data (parliamentary membership episodes only), matching R047.R logic."),
@@ -333,7 +341,9 @@ server <- function(input, output, session) {
     showNotification("Default view saved.", type = "message", duration = 2)
   })
 
-  rese_check_results <- reactive({ run_rese_checks(input$country_select) })
+  rese_check_results <- reactive({
+    run_rese_checks(input$country_select, input$date_range[1], input$date_range[2])
+  })
   parl_check_results <- reactive({ run_parl_checks(input$country_select) })
   meme_check_results <- reactive({ run_meme_checks(input$country_select) })
 

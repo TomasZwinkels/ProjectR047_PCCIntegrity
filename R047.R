@@ -4,7 +4,9 @@
 # For data fixes, use separate fix scripts
 
 # SETUP
-country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United State4s)
+country_code <- "NL"  # Options: "NL" (Netherlands), "CH" (Switzerland), "DE" (Germany), "CA" (Canada), "US" (United States)
+date_from    <- as.Date("1946-01-01") # currently used only by check_RESE_parlmem_coverage (#16)
+date_to      <- Sys.Date() # currently used only by check_RESE_parlmem_coverage (#16)
 
 # Set language and date formatting to English
 Sys.setenv(LANG = "EN")
@@ -155,6 +157,19 @@ cat("No duplicate MEME episodes:", ifelse(meme_overlap_check, "✅ PASS", "❌ F
 meme_party_coverage_check <- check_MEME_parlmembers_have_party(RESE, MEME)
 cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
 
+# 16. Parliamentary membership data coverage across date range
+parlmem_coverage_check <- check_RESE_parlmem_coverage(
+  RESE, PARL, assembly_map[country_code], date_from, date_to)
+cat("All parliaments in date range have membership data:",
+    ifelse(parlmem_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
+if (!parlmem_coverage_check) {
+  det <- check_RESE_parlmem_coverage_details(
+    RESE, PARL, assembly_map[country_code], date_from, date_to)
+  cat("  Parliaments with no data:", det$gap_count, "of", det$parliaments_checked, "\n")
+  cat("  Parliament IDs missing data:",
+      paste(det$parliaments_no_data$parliament_id, collapse = ", "), "\n")
+}
+
 # =============================================================================
 # SUMMARY REPORT
 # =============================================================================
@@ -163,7 +178,7 @@ cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
 all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
                 meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
-                birthdate_dup_check)
+                birthdate_dup_check, parlmem_coverage_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 
