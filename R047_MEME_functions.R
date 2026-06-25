@@ -424,3 +424,139 @@ check_MEME_parlmembers_have_party_details <- function(RESE, MEME) {
     total_meme_persons = length(unique(MEME$pers_id))
   )
 }
+
+###############################################################################
+# Function: find_MEME_overlaps_during_parliament
+#
+# Description:
+#   Internal helper. For each MP, finds all pairs of MEME episodes with
+#   overlapping date ranges where that overlap falls within a parliamentary
+#   service period. Returns a data frame of all such pairs.
+#
+# Parameters:
+#   MEME - preprocessed MEME data (with memep_startdate_posoxctformat,
+#          memep_enddate_posoxctformat columns)
+#   RESE - RESE data already filtered to parliamentary functions, with
+#          start_date (Date), end_date (Date), parliament_id columns
+#
+###############################################################################
+find_MEME_overlaps_during_parliament <- function(MEME, RESE) {
+  empty_result <- data.frame(
+    pers_id        = character(0),
+    memep_id_1     = character(0),
+    memep_id_2     = character(0),
+    party_id_1     = character(0),
+    party_id_2     = character(0),
+    overlap_start  = as.Date(character(0)),
+    overlap_end    = as.Date(character(0)),
+    one_day        = logical(0),
+    parliament_id  = character(0),
+    stringsAsFactors = FALSE
+  )
+
+  if (nrow(MEME) == 0 || nrow(RESE) == 0) return(empty_result)
+
+  far_future <- as.Date("9999-12-31")
+
+  # Convert MEME POSIXct to Date
+  MEME$meme_start <- as.Date(MEME$memep_startdate_posoxctformat)
+  MEME$meme_end   <- as.Date(MEME$memep_enddate_posoxctformat)
+
+  # Only consider persons who are both MPs and have MEME data
+  mp_ids <- intersect(unique(RESE$pers_id), unique(MEME$pers_id))
+  if (length(mp_ids) == 0) return(empty_result)
+
+  results <- list()
+
+  for (pid in mp_ids) {
+    meme_p <- MEME[MEME$pers_id == pid, ]
+    if (nrow(meme_p) < 2) next
+
+    rese_p <- RESE[RESE$pers_id == pid, ]
+
+    for (i in seq_len(nrow(meme_p) - 1)) {
+      if (is.na(meme_p$meme_start[i])) next
+      for (j in (i + 1):nrow(meme_p)) {
+        if (is.na(meme_p$meme_start[j])) next
+        # Compute MEME overlap interval
+        m_start <- max(meme_p$meme_start[i], meme_p$meme_start[j])
+        m_end_i <- if (is.na(meme_p$meme_end[i])) far_future else meme_p$meme_end[i]
+        m_end_j <- if (is.na(meme_p$meme_end[j])) far_future else meme_p$meme_end[j]
+        m_end   <- min(m_end_i, m_end_j)
+
+        if (m_start > m_end) next
+
+        # Check if this MEME overlap intersects any RESE period
+        for (k in seq_len(nrow(rese_p))) {
+          r_start <- rese_p$start_date[k]
+          if (is.na(r_start)) next
+          r_end   <- if (is.na(rese_p$end_date[k])) far_future else rese_p$end_date[k]
+
+          int_start <- max(m_start, r_start)
+          int_end   <- min(m_end, r_end)
+
+          if (int_start <= int_end) {
+            actual_end <- if (int_end == far_future) as.Date(NA) else int_end
+            results[[length(results) + 1]] <- data.frame(
+              pers_id       = pid,
+              memep_id_1    = as.character(meme_p$memep_id[i]),
+              memep_id_2    = as.character(meme_p$memep_id[j]),
+              party_id_1    = as.character(meme_p$party_id[i]),
+              party_id_2    = as.character(meme_p$party_id[j]),
+              overlap_start = int_start,
+              overlap_end   = actual_end,
+              one_day       = as.integer(int_end - int_start) == 0L,
+              parliament_id = as.character(rese_p$parliament_id[k]),
+              stringsAsFactors = FALSE
+            )
+            break
+          }
+        }
+      }
+    }
+  }
+
+  if (length(results) == 0) return(empty_result)
+  do.call(rbind, results)
+}
+
+###############################################################################
+# Function: check_MEME_same_party_overlap_during_parliament_details
+#
+# Description:
+#   Detects MEME episodes for the SAME party with overlapping dates during
+#   a period of parliamentary service. These are likely duplicate entries.
+#
+###############################################################################
+check_MEME_same_party_overlap_during_parliament_details <- function(MEME, RESE) {
+  all_overlaps <- find_MEME_overlaps_during_parliament(MEME, RESE)
+  same_party <- all_overlaps[all_overlaps$party_id_1 == all_overlaps$party_id_2, ]
+
+  list(
+    check_passed     = nrow(same_party) == 0,
+    overlapping_rows = same_party,
+    overlap_count    = nrow(same_party),
+    affected_persons = unique(same_party$pers_id)
+  )
+}
+
+###############################################################################
+# Function: check_MEME_diff_party_overlap_during_parliament_details
+#
+# Description:
+#   Detects MEME episodes for DIFFERENT parties with overlapping dates during
+#   a period of parliamentary service. These indicate ambiguous party
+#   affiliation.
+#
+###############################################################################
+check_MEME_diff_party_overlap_during_parliament_details <- function(MEME, RESE) {
+  all_overlaps <- find_MEME_overlaps_during_parliament(MEME, RESE)
+  diff_party <- all_overlaps[all_overlaps$party_id_1 != all_overlaps$party_id_2, ]
+
+  list(
+    check_passed     = nrow(diff_party) == 0,
+    overlapping_rows = diff_party,
+    overlap_count    = nrow(diff_party),
+    affected_persons = unique(diff_party$pers_id)
+  )
+}

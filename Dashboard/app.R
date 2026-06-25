@@ -3,6 +3,7 @@ for (pkg in c("shiny", "dplyr", "ggplot2", "DT", "testthat")) {
   library(pkg, character.only = TRUE)
 }
 
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
@@ -232,13 +233,17 @@ run_parl_checks <- function(cc) {
 
 parl_detail_keys <- c("full_rows_with_na_dates", "full_rows_with_problems")
 
-run_meme_checks <- function(cc) {
+run_meme_checks <- function(cc, date_from, date_to) {
   meme <- suppressMessages(preprocess_MEMEdates(
     MEME[substr(MEME$pers_id, 1, nchar(cc)) == cc, ]
   ))
   rese_mp <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
+  # For check #7 (party coverage): only MPs active within the date range
+  rese_mp_in_range <- rese_mp[
+    rese_mp$start_date <= date_to &
+      (is.na(rese_mp$end_date) | rese_mp$end_date >= date_from), ]
 
   labels <- c(
     "All MEME person IDs exist in POLI",
@@ -247,7 +252,9 @@ run_meme_checks <- function(cc) {
     "All MEME start dates parsed successfully",
     "No inverted MEME dates",
     "No duplicate MEME episodes",
-    "All MPs have party membership data"
+    "All MPs have party membership data",
+    "No same-party MEME overlaps during parliamentary service",
+    "No different-party MEME overlaps during parliamentary service"
   )
   details <- list(
     check_MEME_persid_in_POLI_details(meme, POLI),
@@ -256,7 +263,9 @@ run_meme_checks <- function(cc) {
     check_anyNAinMEMEdates_details(meme),
     check_MEME_inverted_dates_details(meme),
     check_MEME_anyfulloverlap_details(meme),
-    check_MEME_parlmembers_have_party_details(rese_mp, meme)
+    check_MEME_parlmembers_have_party_details(rese_mp_in_range, meme),
+    check_MEME_same_party_overlap_during_parliament_details(meme, rese_mp_in_range),
+    check_MEME_diff_party_overlap_during_parliament_details(meme, rese_mp_in_range)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -267,7 +276,8 @@ run_meme_checks <- function(cc) {
 meme_detail_keys <- c(
   "missing_rows", "missing_rows", "duplicate_rows",
   "full_rows_with_na_startdates", "inverted_rows",
-  "overlapping_episodes", "missing_rese_rows"
+  "overlapping_episodes", "missing_rese_rows",
+  "overlapping_rows", "overlapping_rows"
 )
 
 checks_dt <- function(df) {
@@ -357,7 +367,8 @@ ui <- fluidPage(
         column(2,  actionButton("recompute_daily", "Recompute", class = "btn-sm btn-default",
                                  style = "float:right; margin-top:4px;"))
       ),
-      plotOutput("rese_daily_plot", height = "700px")
+      plotOutput("rese_daily_plot", height = "700px", click = "daily_plot_click"),
+      uiOutput("overcount_detail")
     ),
     tabPanel("PARL",
       DT::dataTableOutput("parl_checks"),
@@ -412,7 +423,9 @@ server <- function(input, output, session) {
     run_rese_checks(input$country_select, input$date_range[1], input$date_range[2])
   })
   parl_check_results <- reactive({ run_parl_checks(input$country_select) })
-  meme_check_results <- reactive({ run_meme_checks(input$country_select) })
+  meme_check_results <- reactive({
+    run_meme_checks(input$country_select, input$date_range[1], input$date_range[2])
+  })
 
   output$rese_checks <- DT::renderDataTable({ checks_dt(rese_check_results()$table) })
   output$parl_checks <- DT::renderDataTable({ checks_dt(parl_check_results()$table) })
@@ -430,8 +443,9 @@ server <- function(input, output, session) {
     req(r$table$Status[i] == "FAIL")
     df <- r$details[[i]][[rese_detail_keys[i]]]
     req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "tip"))
+    DT::datatable(df, rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
   })
 
   output$parl_detail <- renderUI({
@@ -446,8 +460,9 @@ server <- function(input, output, session) {
     req(r$table$Status[i] == "FAIL")
     df <- r$details[[i]][[parl_detail_keys[i]]]
     req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "tip"))
+    DT::datatable(df, rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
   })
 
   output$meme_detail <- renderUI({
@@ -462,8 +477,9 @@ server <- function(input, output, session) {
     req(r$table$Status[i] == "FAIL")
     df <- r$details[[i]][[meme_detail_keys[i]]]
     req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "tip"))
+    DT::datatable(df, rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
   })
 
   # --- Daily MP counts graph (RESE_MP tab) ---
@@ -547,6 +563,96 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 13) +
       theme(plot.background  = element_rect(fill = "white", color = NA),
             panel.background = element_rect(fill = "white", color = NA))
+  })
+
+  # --- Overcount episode click detail (RESE_MP tab) ---
+
+  overcount_episodes <- reactive({
+    dc <- daily_counts()
+    req(nrow(dc) > 0)
+    dc <- dc[!is.na(dc$parliament_size), ]
+    dc$over <- dc$n_seated > dc$parliament_size
+    if (!any(dc$over)) return(NULL)
+
+    # Identify contiguous runs of overcount days
+    runs <- rle(dc$over)
+    end_idx   <- cumsum(runs$lengths)
+    start_idx <- end_idx - runs$lengths + 1
+    which_over <- which(runs$values)
+
+    episodes <- data.frame(
+      start_date = dc$date[start_idx[which_over]],
+      end_date   = dc$date[end_idx[which_over]],
+      stringsAsFactors = FALSE
+    )
+
+    # Compute stats per episode
+    episodes$duration_days <- as.integer(episodes$end_date - episodes$start_date) + 1L
+    for (i in seq_len(nrow(episodes))) {
+      rows <- dc[dc$date >= episodes$start_date[i] & dc$date <= episodes$end_date[i], ]
+      excess <- rows$n_seated - rows$parliament_size
+      episodes$peak_excess[i]    <- max(excess)
+      episodes$mean_excess[i]    <- round(mean(excess), 1)
+      episodes$parliament_size[i] <- rows$parliament_size[1]
+    }
+    episodes
+  })
+
+  output$overcount_detail <- renderUI({
+    req(input$daily_plot_click)
+    eps <- overcount_episodes()
+    if (is.null(eps) || nrow(eps) == 0) return(NULL)
+
+    clicked_date <- as.Date(input$daily_plot_click$x, origin = "1970-01-01")
+
+    # Distance from click to each episode (0 if inside)
+    dist_to_ep <- pmax(
+      as.numeric(eps$start_date - clicked_date),
+      as.numeric(clicked_date - eps$end_date),
+      0
+    )
+    nearest <- which.min(dist_to_ep)
+    if (dist_to_ep[nearest] > 365) return(NULL)
+
+    ep <- eps[nearest, ]
+
+    # Find RESE entries ending on the episode end date
+    cc <- input$country_select
+    rese_ending <- RESE[RESE$country_abb == cc &
+                          RESE$political_function %in%
+                            c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
+                          !is.na(RESE$end_date) &
+                          RESE$end_date == ep$end_date,
+                        c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
+                          "political_function", "parliament_id")]
+
+    tagList(
+      tags$hr(),
+      tags$p(
+        style = "font-weight:bold; color:#c0392b;",
+        paste0("Overcount episode: ",
+               format_pcc_date(ep$start_date), " \u2013 ",
+               format_pcc_date(ep$end_date),
+               " (", ep$duration_days, " days)")
+      ),
+      tags$p(
+        paste0("Official parliament size: ", ep$parliament_size,
+               "  |  Peak excess: +", ep$peak_excess,
+               "  |  Mean excess: +", ep$mean_excess)
+      ),
+      if (nrow(rese_ending) > 0) {
+        tagList(
+          tags$p(style = "font-weight:bold; margin-top:8px;",
+                 paste0("RESE entries ending on ", format_pcc_date(ep$end_date),
+                        " (", nrow(rese_ending), "):")),
+          DT::renderDataTable(
+            DT::datatable(rese_ending, rownames = FALSE,
+                          options = list(scrollX = TRUE, pageLength = 10, dom = "tip",
+                                order = list(list(0, "asc"))))
+          )
+        )
+      }
+    )
   })
 
   # --- POLI tab ---

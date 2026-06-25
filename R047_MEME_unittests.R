@@ -500,3 +500,123 @@ test_that("details when RESE has no parliamentary episodes", {
   expect_true(d$check_passed)
   expect_equal(d$total_parlmembers, 0)
 })
+
+# ==================================================================
+# Block: check_MEME_same/diff_party_overlap_during_parliament
+# ==================================================================
+
+# Helper to create RESE test data for parliamentary membership
+mk_rese_mp <- function(pers_id, start_dates, end_dates, parliament_ids) {
+  n <- length(pers_id)
+  data.frame(
+    pers_id            = pers_id,
+    political_function = rep("NT_LE_T3_NA_01", n),
+    start_date         = as.Date(start_dates),
+    end_date           = as.Date(end_dates),
+    parliament_id      = parliament_ids,
+    stringsAsFactors   = FALSE
+  )
+}
+
+test_that("no MEME overlap: both checks pass", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P2"),
+    c("2020-01-01", "2020-07-01"), c("2020-06-30", "2020-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2020-12-31", "PARL1")
+  expect_true(check_MEME_same_party_overlap_during_parliament_details(meme, rese)$check_passed)
+  expect_true(check_MEME_diff_party_overlap_during_parliament_details(meme, rese)$check_passed)
+})
+
+test_that("MEME overlap outside parliament: both checks pass", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P2"),
+    c("2018-01-01", "2018-06-01"), c("2018-12-31", "2018-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2020-12-31", "PARL1")
+  expect_true(check_MEME_same_party_overlap_during_parliament_details(meme, rese)$check_passed)
+  expect_true(check_MEME_diff_party_overlap_during_parliament_details(meme, rese)$check_passed)
+})
+
+test_that("different-party overlap during parliament: only diff check fails", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P2"),
+    c("2020-01-01", "2020-06-01"), c("2020-12-31", "2021-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2024-12-31", "PARL1")
+  same <- check_MEME_same_party_overlap_during_parliament_details(meme, rese)
+  diff <- check_MEME_diff_party_overlap_during_parliament_details(meme, rese)
+  expect_true(same$check_passed)
+  expect_false(diff$check_passed)
+  expect_equal(diff$overlap_count, 1)
+  expect_equal(diff$affected_persons, "A")
+})
+
+test_that("same-party overlap during parliament: only same check fails", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P1"),
+    c("2020-01-01", "2020-06-01"), c("2020-12-31", "2021-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2024-12-31", "PARL1")
+  same <- check_MEME_same_party_overlap_during_parliament_details(meme, rese)
+  diff <- check_MEME_diff_party_overlap_during_parliament_details(meme, rese)
+  expect_false(same$check_passed)
+  expect_equal(same$overlap_count, 1)
+  expect_true(diff$check_passed)
+})
+
+test_that("multiple persons, only one has a problem", {
+  meme <- mk_meme_full(
+    c("m1", "m2", "m3", "m4"),
+    c("A", "A", "B", "B"),
+    c("P1", "P2", "P1", "P2"),
+    c("2020-01-01", "2020-07-01", "2020-01-01", "2020-07-01"),
+    c("2020-06-30", "2020-12-31", "2020-12-31", "2021-12-31")
+  )
+  rese <- mk_rese_mp(
+    c("A", "B"), c("2020-01-01", "2020-01-01"),
+    c("2024-12-31", "2024-12-31"), c("PARL1", "PARL1")
+  )
+  diff <- check_MEME_diff_party_overlap_during_parliament_details(meme, rese)
+  expect_false(diff$check_passed)
+  expect_equal(diff$affected_persons, "B")
+})
+
+test_that("open-ended MEME (NA end) overlapping during parliament", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P2"),
+    c("2020-01-01", "2020-06-01"), c(NA, NA)
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2024-12-31", "PARL1")
+  diff <- check_MEME_diff_party_overlap_during_parliament_details(meme, rese)
+  expect_false(diff$check_passed)
+  expect_equal(diff$overlap_count, 1)
+})
+
+test_that("open-ended RESE (NA end) detects overlap", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("A", "A"), c("P1", "P2"),
+    c("2020-01-01", "2020-06-01"), c("2020-12-31", "2021-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", NA, "PARL1")
+  diff <- check_MEME_diff_party_overlap_during_parliament_details(meme, rese)
+  expect_false(diff$check_passed)
+})
+
+test_that("empty inputs: both checks pass", {
+  meme_empty <- mk_meme_full(character(0), character(0), character(0), character(0), character(0))
+  rese <- mk_rese_mp("A", "2020-01-01", "2020-12-31", "PARL1")
+  rese_empty <- mk_rese_mp(character(0), character(0), character(0), character(0))
+  meme <- mk_meme_full("m1", "A", "P1", "2020-01-01", "2020-12-31")
+  expect_true(check_MEME_diff_party_overlap_during_parliament_details(meme_empty, rese)$check_passed)
+  expect_true(check_MEME_diff_party_overlap_during_parliament_details(meme, rese_empty)$check_passed)
+})
+
+test_that("non-MP person with overlapping MEME is ignored", {
+  meme <- mk_meme_full(
+    c("m1", "m2"), c("X", "X"), c("P1", "P2"),
+    c("2020-01-01", "2020-06-01"), c("2020-12-31", "2021-12-31")
+  )
+  rese <- mk_rese_mp("A", "2020-01-01", "2024-12-31", "PARL1")
+  expect_true(check_MEME_diff_party_overlap_during_parliament_details(meme, rese)$check_passed)
+})

@@ -1,4 +1,17 @@
 ###############################################################################
+# Function: format_pcc_date
+#
+# Description:
+#   Converts a Date (or POSIXct) to PCC format: "05nov1959" (dd + lowercase
+#   3-letter month abbreviation + yyyy). Vectorised; returns NA for NA input.
+#
+###############################################################################
+
+format_pcc_date <- function(x) {
+  tolower(format(as.Date(x), "%d%b%Y"))
+}
+
+###############################################################################
 # Function: substrRight
 #
 # Description:

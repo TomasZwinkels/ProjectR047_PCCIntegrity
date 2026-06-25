@@ -290,3 +290,32 @@ test_that("find_suspicious_end_dates works as expected", {
   p3_row <- result[result$pers_id == "p3", ]
   expect_equal(p3_row$end_diff_days, 1)
 })
+
+################################################################################
+# Unit Tests for format_pcc_date Function
+################################################################################
+
+test_that("format_pcc_date converts a single Date to PCC format", {
+  expect_equal(format_pcc_date(as.Date("1959-11-05")), "05nov1959")
+})
+
+test_that("format_pcc_date uses lowercase month abbreviations", {
+  expect_equal(format_pcc_date(as.Date("2020-03-15")), "15mar2020")
+  expect_equal(format_pcc_date(as.Date("1946-01-01")), "01jan1946")
+})
+
+test_that("format_pcc_date is vectorised", {
+  dates <- as.Date(c("2000-06-01", "2012-12-25"))
+  expect_equal(format_pcc_date(dates), c("01jun2000", "25dec2012"))
+})
+
+test_that("format_pcc_date returns NA for NA input", {
+  expect_true(is.na(format_pcc_date(NA)))
+  result <- format_pcc_date(c(as.Date("2020-01-01"), NA))
+  expect_equal(result[1], "01jan2020")
+  expect_true(is.na(result[2]))
+})
+
+test_that("format_pcc_date works with POSIXct input", {
+  expect_equal(format_pcc_date(as.POSIXct("1959-11-05 12:00:00")), "05nov1959")
+})
