@@ -59,7 +59,7 @@ build_cohort <- function(country_code) {
   rese <- RESE |>
     filter(
       country_abb == country_code,
-      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")
+      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
     )
 
   parl <- PARL |>
@@ -99,7 +99,7 @@ cache_dir <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/cache"
 build_daily_counts <- function(cc) {
   rese_cc <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
   parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
                     PARL$assembly_abb == assembly_map[[cc]], ]
   parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
@@ -171,7 +171,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
     RESE[RESE$country_abb == cc, ]
   ))
   rese_mp <- rese_mp[rese_mp$political_function %in%
-                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01"), ]
+                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
 
   labels <- c(
     "All RESE person IDs exist in POLI",
@@ -238,7 +238,7 @@ run_meme_checks <- function(cc) {
   ))
   rese_mp <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
 
   labels <- c(
     "All MEME person IDs exist in POLI",
@@ -357,7 +357,7 @@ ui <- fluidPage(
         column(2,  actionButton("recompute_daily", "Recompute", class = "btn-sm btn-default",
                                  style = "float:right; margin-top:4px;"))
       ),
-      plotOutput("rese_daily_plot", height = "350px")
+      plotOutput("rese_daily_plot", height = "700px")
     ),
     tabPanel("PARL",
       DT::dataTableOutput("parl_checks"),
@@ -533,7 +533,7 @@ server <- function(input, output, session) {
     RESE |>
       filter(
         country_abb == input$country_select,
-        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01")
+        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
       ) |>
       pull(pers_id) |>
       unique()
