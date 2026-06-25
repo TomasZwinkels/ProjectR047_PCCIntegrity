@@ -367,6 +367,7 @@ ui <- fluidPage(
         column(2,  actionButton("recompute_daily", "Recompute", class = "btn-sm btn-default",
                                  style = "float:right; margin-top:4px;"))
       ),
+      uiOutput("rese_daily_metrics"),
       plotOutput("rese_daily_plot", height = "700px", click = "daily_plot_click"),
       uiOutput("overcount_detail")
     ),
@@ -400,7 +401,9 @@ ui <- fluidPage(
         inline   = TRUE
       ),
       plotOutput("poli_plot"),
-      uiOutput("poli_plot_note")
+      uiOutput("poli_plot_note"),
+      uiOutput("poli_missing_header"),
+      DT::DTOutput("poli_missing_dt")
     )
   )
 )
@@ -563,6 +566,29 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 13) +
       theme(plot.background  = element_rect(fill = "white", color = NA),
             panel.background = element_rect(fill = "white", color = NA))
+  })
+
+  output$rese_daily_metrics <- renderUI({
+    dc <- daily_counts()
+    req(nrow(dc) > 0)
+    df <- dc[dc$date >= input$date_range[1] & dc$date <= input$date_range[2] &
+               !is.na(dc$parliament_size), ]
+    req(nrow(df) > 0)
+
+    n_total <- nrow(df)
+    pct_over  <- round(100 * sum(df$n_seated > df$parliament_size) / n_total, 1)
+    pct_under <- round(100 * sum(df$n_seated < df$parliament_size) / n_total, 1)
+
+    tags$p(
+      style = "margin-bottom:4px; font-size:0.95em;",
+      tags$span(style = "color:#c0392b; font-weight:bold;",
+                paste0("Overcount: ", pct_over, "% of days")),
+      " | ",
+      tags$span(style = "color:#2874a6; font-weight:bold;",
+                paste0("Undercount: ", pct_under, "% of days")),
+      tags$span(style = "color:#666;",
+                paste0("  (", format(n_total, big.mark = ","), " days with parliament size data)"))
+    )
   })
 
   # --- Overcount episode click detail (RESE_MP tab) ---
@@ -887,6 +913,31 @@ server <- function(input, output, session) {
         paste(periods, collapse = "; "), "."
       )
     )
+  })
+
+  output$poli_missing_header <- renderUI({
+    req(input$poli_completeness_rows_selected)
+    selected_var <- poli_vars[input$poli_completeness_rows_selected]
+    d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
+    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+    if (nrow(missing) == 0) {
+      return(tags$p(style = "color:#28a745; font-weight:bold; margin-top:8px;",
+                    paste0("All MPs have ", selected_var, " available.")))
+    }
+    tags$p(style = "font-weight:bold; color:#c0392b; margin-top:8px;",
+           paste0("MPs missing ", selected_var, " (", nrow(missing), "):"))
+  })
+
+  output$poli_missing_dt <- DT::renderDT({
+    req(input$poli_completeness_rows_selected)
+    selected_var <- poli_vars[input$poli_completeness_rows_selected]
+    d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
+    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+    req(nrow(missing) > 0)
+    show_cols <- c("pers_id", setdiff(poli_vars, selected_var))
+    DT::datatable(missing[, show_cols, drop = FALSE], rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
   })
 
 }
