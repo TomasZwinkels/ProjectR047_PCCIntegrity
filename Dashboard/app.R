@@ -509,6 +509,22 @@ server <- function(input, output, session) {
                              year = format(parl_steps$leg_period_start_date, "%Y"))
     y_min <- min(c(df$n_seated, df$parliament_size), na.rm = TRUE)
 
+    # Flag days where seated count exceeds official parliament size
+    df$overcount <- !is.na(df$parliament_size) & df$n_seated > df$parliament_size
+    # Create run-length groups; duplicate boundary rows so segments overlap and connect
+    df$segment <- cumsum(c(1, diff(df$overcount) != 0))
+    seg_ids <- unique(df$segment)
+    if (length(seg_ids) > 1) {
+      bridges <- lapply(seq_len(length(seg_ids) - 1), function(k) {
+        row <- df[df$segment == seg_ids[k + 1], ][1, ]
+        row$segment  <- seg_ids[k]
+        row$overcount <- df$overcount[df$segment == seg_ids[k]][1]
+        row
+      })
+      df <- rbind(df, do.call(rbind, bridges))
+      df <- df[order(df$date, df$segment), ]
+    }
+
     ggplot(df, aes(x = date)) +
       geom_vline(xintercept = parl_steps$leg_period_start_date,
                  color = "gray70", alpha = 0.5, linewidth = 0.3) +
@@ -517,13 +533,16 @@ server <- function(input, output, session) {
                 hjust = 0, vjust = 0.5, inherit.aes = FALSE) +
       geom_step(aes(y = parliament_size), color = "gray40",
                 linewidth = 0.8, na.rm = TRUE) +
-      geom_line(aes(y = n_seated), color = "steelblue", linewidth = 0.5) +
+      geom_line(aes(y = n_seated, color = overcount, group = segment),
+                linewidth = 0.5) +
+      scale_color_manual(values = c("FALSE" = "steelblue", "TRUE" = "red"),
+                         guide = "none") +
       scale_x_date(name = "Date",
                    limits = c(input$date_range[1], input$date_range[2])) +
       scale_y_continuous(name = "MPs (count)") +
       labs(
         title    = paste0("Daily seated MPs \u2014 ", country_name),
-        subtitle = "Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)"
+        subtitle = "Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)   Red: overcount"
       ) +
       theme_minimal(base_size = 13) +
       theme(plot.background  = element_rect(fill = "white", color = NA),
