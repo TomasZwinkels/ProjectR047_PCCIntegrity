@@ -93,6 +93,60 @@ build_cohort <- function(country_code) {
   do.call(rbind, Filter(Negate(is.null), cohort_list))
 }
 
+# Day-by-day seated MP counts for a country (full data range, cached to disk)
+cache_dir <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/cache"
+
+build_daily_counts <- function(cc) {
+  rese_cc <- RESE[RESE$country_abb == cc &
+                    RESE$political_function %in%
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01"), ]
+  parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
+                    PARL$assembly_abb == assembly_map[[cc]], ]
+  parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
+
+  if (nrow(parl_cc) == 0 || nrow(rese_cc) == 0) {
+    return(data.frame(date = as.Date(character(0)),
+                      n_seated = integer(0),
+                      parliament_size = integer(0)))
+  }
+
+  date_seq <- seq(min(parl_cc$leg_period_start_date, na.rm = TRUE),
+                  max(c(rese_cc$end_date[!is.na(rese_cc$end_date)], Sys.Date())),
+                  by = "day")
+
+  rese_start <- rese_cc$start_date
+  rese_end   <- rese_cc$end_date
+
+  n_seated <- vapply(date_seq, function(d) {
+    sum(rese_start <= d & (is.na(rese_end) | rese_end >= d), na.rm = TRUE)
+  }, integer(1))
+
+  idx <- findInterval(as.numeric(date_seq), as.numeric(parl_cc$leg_period_start_date))
+  parliament_size <- ifelse(idx == 0L, NA_integer_,
+                            as.integer(parl_cc$parliament_size[idx]))
+
+  data.frame(date = date_seq, n_seated = n_seated,
+             parliament_size = parliament_size)
+}
+
+get_daily_counts <- function(cc, force = FALSE) {
+  cache_rds <- file.path(cache_dir, paste0("daily_counts_", cc, ".rds"))
+  cache_ver <- file.path(cache_dir, paste0("daily_counts_", cc, "_version.txt"))
+  data_version <- trimws(readLines(
+    "/home/tomas/projects/PCCdata/dataversion.txt")[1])
+
+  if (!force && file.exists(cache_rds) && file.exists(cache_ver) &&
+      trimws(readLines(cache_ver)[1]) == data_version) {
+    return(readRDS(cache_rds))
+  }
+
+  result <- build_daily_counts(cc)
+  if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+  saveRDS(result, cache_rds)
+  writeLines(data_version, cache_ver)
+  result
+}
+
 # Verified same-birthday pairs that are genuinely different people (from R047.R)
 verified_not_duplicates <- data.frame(
   pers_id_1 = c("NL_Suurhoff_Ko_1905", "NL_vanBuel_Ben_1913",
@@ -296,7 +350,14 @@ ui <- fluidPage(
       DT::dataTableOutput("rese_checks"),
       tags$small(style = "color:#666; margin-top:4px; display:block;",
         "Checks run on country-filtered RESE data (parliamentary membership episodes only), matching R047.R logic."),
-      uiOutput("rese_detail")
+      uiOutput("rese_detail"),
+      tags$hr(),
+      fluidRow(
+        column(10, tags$h5("Daily seated MPs (RESE) vs. official parliament size (PARL)")),
+        column(2,  actionButton("recompute_daily", "Recompute", class = "btn-sm btn-default",
+                                 style = "float:right; margin-top:4px;"))
+      ),
+      plotOutput("rese_daily_plot", height = "350px")
     ),
     tabPanel("PARL",
       DT::dataTableOutput("parl_checks"),
@@ -404,6 +465,65 @@ server <- function(input, output, session) {
     DT::datatable(df, rownames = FALSE,
                   options = list(scrollX = TRUE, pageLength = 10, dom = "tip"))
   })
+
+  # --- Daily MP counts graph (RESE_MP tab) ---
+
+  daily_cache_version <- reactiveVal(0)
+
+  observeEvent(input$recompute_daily, {
+    cc <- input$country_select
+    f_rds <- file.path(cache_dir, paste0("daily_counts_", cc, ".rds"))
+    f_ver <- file.path(cache_dir, paste0("daily_counts_", cc, "_version.txt"))
+    if (file.exists(f_rds)) file.remove(f_rds)
+    if (file.exists(f_ver)) file.remove(f_ver)
+    daily_cache_version(daily_cache_version() + 1)
+  })
+
+  daily_counts <- reactive({
+    daily_cache_version()
+    cc <- input$country_select
+    withProgress(message = paste("Computing daily MP counts for", cc, "..."),
+                 value = 0.5, {
+      get_daily_counts(cc)
+    })
+  })
+
+  output$rese_daily_plot <- renderPlot({
+    dc <- daily_counts()
+    req(nrow(dc) > 0)
+
+    df <- dc[dc$date >= input$date_range[1] & dc$date <= input$date_range[2], ]
+    req(nrow(df) > 0)
+
+    parl_steps <- PARL |>
+      filter(country_abb == input$country_select, level == "NT",
+             assembly_abb == assembly_map[[input$country_select]],
+             leg_period_start_date >= input$date_range[1],
+             leg_period_start_date <= input$date_range[2]) |>
+      arrange(leg_period_start_date)
+
+    country_name <- country_labels[input$country_select]
+    if (is.na(country_name)) country_name <- input$country_select
+
+    ggplot(df, aes(x = date)) +
+      geom_vline(xintercept = parl_steps$leg_period_start_date,
+                 color = "gray70", alpha = 0.5, linewidth = 0.3) +
+      geom_step(aes(y = parliament_size), color = "gray40",
+                linewidth = 0.8, na.rm = TRUE) +
+      geom_line(aes(y = n_seated), color = "steelblue", linewidth = 0.5) +
+      scale_x_date(name = "Date",
+                   limits = c(input$date_range[1], input$date_range[2])) +
+      scale_y_continuous(name = "MPs (count)") +
+      labs(
+        title    = paste0("Daily seated MPs \u2014 ", country_name),
+        subtitle = "Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(plot.background  = element_rect(fill = "white", color = NA),
+            panel.background = element_rect(fill = "white", color = NA))
+  })
+
+  # --- POLI tab ---
 
   filtered <- reactive({
     POLI |> filter(country == input$country_select)
