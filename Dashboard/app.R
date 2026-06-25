@@ -505,9 +505,16 @@ server <- function(input, output, session) {
     country_name <- country_labels[input$country_select]
     if (is.na(country_name)) country_name <- input$country_select
 
+    parl_years <- data.frame(date = parl_steps$leg_period_start_date,
+                             year = format(parl_steps$leg_period_start_date, "%Y"))
+    y_min <- min(c(df$n_seated, df$parliament_size), na.rm = TRUE)
+
     ggplot(df, aes(x = date)) +
       geom_vline(xintercept = parl_steps$leg_period_start_date,
                  color = "gray70", alpha = 0.5, linewidth = 0.3) +
+      geom_text(data = parl_years, aes(x = date, y = y_min, label = year),
+                angle = 90, size = 4.5, color = "gray50",
+                hjust = 0, vjust = 0.5, inherit.aes = FALSE) +
       geom_step(aes(y = parliament_size), color = "gray40",
                 linewidth = 0.8, na.rm = TRUE) +
       geom_line(aes(y = n_seated), color = "steelblue", linewidth = 0.5) +
