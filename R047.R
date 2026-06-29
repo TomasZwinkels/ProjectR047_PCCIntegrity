@@ -28,11 +28,13 @@ source("R047_functions.R")
 source("R047_RESE_functions.R")
 source("R047_PARL_functions.R")
 source("R047_MEME_functions.R")
+source("R047_POLI_functions.R")
 
 test_file("R047_unittests.R")
 test_file("R047_RESE_unittests.R")
 test_file("R047_PARL_unittests.R")
 test_file("R047_MEME_unittests.R")
+test_file("R047_POLI_unittests.R")
 
 cat("=== R047 STREAMLINED DATA INTEGRITY CHECKS ===\n")
 cat("Country:", country_code, "\n\n")
@@ -85,6 +87,15 @@ cat("- RESE now has: N=", nrow(RESE), "resume entries\n")
 
 
 cat("=== CORE INTEGRITY CHECKS ===\n")
+
+# --- POLI Checks ---
+cat("--- POLI Checks ---\n")
+
+poli_persid_unique_check <- check_POLI_persid_unique(POLI)
+cat("All POLI person IDs are unique:", ifelse(poli_persid_unique_check, "✅ PASS", "❌ FAIL"), "\n")
+
+# --- RESE Checks ---
+cat("\n--- RESE Checks ---\n")
 
 # 1. Person ID validation
 person_id_check <- check_RESE_persid_in_POLI(RESE, POLI)
@@ -194,7 +205,8 @@ if (!coverage_dateto_check) {
 
 cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
-all_checks <- c(person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
+all_checks <- c(poli_persid_unique_check,
+                person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
                 meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
                 birthdate_dup_check, parlmem_coverage_check, coverage_datefrom_check, coverage_dateto_check)
 checks_passed <- sum(all_checks)

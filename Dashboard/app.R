@@ -7,10 +7,12 @@ source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_functions.R")
 
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_unittests.R")
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_unittests.R")
 
 # Load data once at startup
 POLI <- read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";") |>
@@ -46,7 +48,7 @@ saved <- if (file.exists(defaults_file)) {
        date_to = as.Date("2025-12-31"), tab = "RESE_MP")
 }
 
-poli_vars <- c("last_name", "first_name", "birth_date", "birth_place_raw")
+poli_base_vars <- c("last_name", "first_name", "birth_date", "death_date", "birth_place_raw", "wikidata_id")
 
 country_labels <- c(
   CA = "Canada", CH = "Switzerland", DE = "Germany",
@@ -280,6 +282,22 @@ meme_detail_keys <- c(
   "overlapping_rows", "overlapping_rows"
 )
 
+run_poli_checks <- function(cc) {
+  poli_cc <- POLI[POLI$country == cc, ]
+  labels <- c(
+    "All POLI person IDs are unique"
+  )
+  details <- list(
+    check_POLI_persid_unique_details(poli_cc)
+  )
+  list(
+    table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
+    details = details
+  )
+}
+
+poli_check_detail_keys <- c("duplicate_rows")
+
 checks_dt <- function(df) {
   DT::datatable(
     df,
@@ -385,6 +403,11 @@ ui <- fluidPage(
     ),
     tabPanel(
       "POLI",
+      DT::dataTableOutput("poli_checks"),
+      tags$small(style = "color:#666; margin-top:4px; display:block;",
+        "Checks run on country-filtered POLI data, matching R047.R logic."),
+      uiOutput("poli_check_detail"),
+      tags$hr(),
       DT::dataTableOutput("poli_completeness"),
       checkboxGroupInput(
         inputId  = "plot_layers",
@@ -429,10 +452,12 @@ server <- function(input, output, session) {
   meme_check_results <- reactive({
     run_meme_checks(input$country_select, input$date_range[1], input$date_range[2])
   })
+  poli_check_results <- reactive({ run_poli_checks(input$country_select) })
 
   output$rese_checks <- DT::renderDataTable({ checks_dt(rese_check_results()$table) })
   output$parl_checks <- DT::renderDataTable({ checks_dt(parl_check_results()$table) })
   output$meme_checks <- DT::renderDataTable({ checks_dt(meme_check_results()$table) })
+  output$poli_checks <- DT::renderDataTable({ checks_dt(poli_check_results()$table) })
 
   output$rese_detail <- renderUI({
     req(input$rese_checks_rows_selected)
@@ -479,6 +504,23 @@ server <- function(input, output, session) {
     i <- input$meme_checks_rows_selected
     req(r$table$Status[i] == "FAIL")
     df <- r$details[[i]][[meme_detail_keys[i]]]
+    req(!is.null(df) && nrow(df) > 0)
+    DT::datatable(df, rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
+  })
+
+  output$poli_check_detail <- renderUI({
+    req(input$poli_checks_rows_selected)
+    detail_header_ui(poli_check_results(), input$poli_checks_rows_selected,
+                     poli_check_detail_keys, "poli_check_detail_dt")
+  })
+  output$poli_check_detail_dt <- DT::renderDT({
+    req(input$poli_checks_rows_selected)
+    r <- poli_check_results()
+    i <- input$poli_checks_rows_selected
+    req(r$table$Status[i] == "FAIL")
+    df <- r$details[[i]][[poli_check_detail_keys[i]]]
     req(!is.null(df) && nrow(df) > 0)
     DT::datatable(df, rownames = FALSE, filter = "top",
                   options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
@@ -683,6 +725,12 @@ server <- function(input, output, session) {
 
   # --- POLI tab ---
 
+  poli_vars <- reactive({
+    cc <- tolower(input$country_select)
+    id_cols <- grep(paste0("^id_", cc, "_"), names(POLI), value = TRUE, ignore.case = TRUE)
+    c(poli_base_vars, sort(id_cols))
+  })
+
   filtered <- reactive({
     POLI |> filter(country == input$country_select)
   })
@@ -720,23 +768,15 @@ server <- function(input, output, session) {
     d_mp  <- d |> filter(pers_id %in% ever_mp_ids())
     avail <- function(x) !is.na(x) & x != ""
 
+    vars <- poli_vars()
     df <- data.frame(
-      Variable          = poli_vars,
-      `N (all)`         = nrow(d),
-      `% Avail (all)`   = c(
-        round(mean(avail(d$last_name))       * 100, 1),
-        round(mean(avail(d$first_name))      * 100, 1),
-        round(mean(avail(d$birth_date))      * 100, 1),
-        round(mean(avail(d$birth_place_raw)) * 100, 1)
-      ),
-      `N (MPs)`         = nrow(d_mp),
-      `% Avail (MPs)`   = c(
-        round(mean(avail(d_mp$last_name))       * 100, 1),
-        round(mean(avail(d_mp$first_name))      * 100, 1),
-        round(mean(avail(d_mp$birth_date))      * 100, 1),
-        round(mean(avail(d_mp$birth_place_raw)) * 100, 1)
-      ),
-      check.names = FALSE
+      Variable        = vars,
+      `N (all)`       = nrow(d),
+      `% Avail (all)` = sapply(vars, function(v) round(mean(avail(d[[v]])) * 100, 1)),
+      `N (MPs)`       = nrow(d_mp),
+      `% Avail (MPs)` = sapply(vars, function(v) round(mean(avail(d_mp[[v]])) * 100, 1)),
+      check.names     = FALSE,
+      row.names       = NULL
     )
     DT::datatable(
       df,
@@ -765,7 +805,7 @@ server <- function(input, output, session) {
   output$poli_plot <- renderPlot({
     req(input$poli_completeness_rows_selected)
 
-    selected_var <- poli_vars[input$poli_completeness_rows_selected]
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
 
     ch <- cohort()
     req(!is.null(ch))
@@ -917,7 +957,7 @@ server <- function(input, output, session) {
 
   output$poli_missing_header <- renderUI({
     req(input$poli_completeness_rows_selected)
-    selected_var <- poli_vars[input$poli_completeness_rows_selected]
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
     d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
     missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
     if (nrow(missing) == 0) {
@@ -930,11 +970,11 @@ server <- function(input, output, session) {
 
   output$poli_missing_dt <- DT::renderDT({
     req(input$poli_completeness_rows_selected)
-    selected_var <- poli_vars[input$poli_completeness_rows_selected]
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
     d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
     missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
     req(nrow(missing) > 0)
-    show_cols <- c("pers_id", setdiff(poli_vars, selected_var))
+    show_cols <- c("pers_id", setdiff(poli_vars(), selected_var))
     DT::datatable(missing[, show_cols, drop = FALSE], rownames = FALSE, filter = "top",
                   options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
                                 order = list(list(0, "asc"))))
