@@ -631,7 +631,6 @@ ui <- fluidPage(
       plotOutput("poli_plot"),
       uiOutput("poli_plot_note"),
       uiOutput("poli_missing_header"),
-      DT::DTOutput("poli_missing_dt"),
       uiOutput("poli_completeness_issue_path")
     )
   )
@@ -1417,8 +1416,11 @@ server <- function(input, output, session) {
       return(tags$p(style = "color:#28a745; font-weight:bold; margin-top:8px;",
                     paste0("All MPs have ", selected_var, " available.")))
     }
-    tags$p(style = "font-weight:bold; color:#c0392b; margin-top:8px;",
-           paste0("MPs missing ", selected_var, " (", nrow(missing), "):"))
+    tagList(
+      tags$p(style = "font-weight:bold; color:#c0392b; margin-top:8px;",
+             paste0("MPs missing ", selected_var, " (", nrow(missing), "):")),
+      DT::DTOutput("poli_missing_dt")
+    )
   })
 
   output$poli_missing_dt <- DT::renderDT({
