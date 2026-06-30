@@ -674,32 +674,58 @@ server <- function(input, output, session) {
     if (nrow(existing) == 0) {
       html <- "<p style='font-size:0.85em; color:#999; margin:4px 0;'>No matching issues found.</p>"
     } else {
-      rows_html <- vapply(seq_len(nrow(existing)), function(i) {
-        row <- existing[i, ]
-        icon <- if (row$state == "OPEN") "&#9679;" else "&#10003;"
-        color <- if (row$state == "OPEN") "#28a745" else "#6f42c1"
+      render_row <- function(row) {
         sprintf(paste0(
           "<li style='margin-bottom:3px;'>",
-          "<span style='color:%s; margin-right:4px;'>%s</span>",
           "<a href='#' ",
           "onclick=\"Shiny.setInputValue('open_url',{url:'%s',nonce:Math.random()});return false;\" ",
           "style='text-decoration:none;color:#0366d6;cursor:pointer;'>",
           "#%d %s</a> ",
-          "<span style='color:#999;font-size:0.85em;'>[%s]</span> ",
           "<span style='color:#aaa;font-size:0.75em;'>%s</span>",
           "</li>"
-        ), color, icon, row$url, row$number,
-          htmltools::htmlEscape(row$title), tolower(row$state), row$url)
-      }, character(1))
+        ), row$url, row$number,
+          htmltools::htmlEscape(row$title), row$url)
+      }
 
-      html <- sprintf(paste0(
-        "<div style='margin:6px 0;padding:6px 10px;background:#fefefe;",
-        "border:1px solid #e8e8e8;border-radius:3px;'>",
-        "<p style='font-size:0.85em;font-weight:bold;color:#555;margin-bottom:4px;'>",
-        "Existing issues (%d):</p>",
-        "<ul style='list-style:none;padding-left:0;margin:0;font-size:0.9em;'>%s</ul>",
-        "</div>"
-      ), nrow(existing), paste(rows_html, collapse = "\n"))
+      open_issues   <- existing[existing$state == "OPEN", ]
+      closed_issues <- existing[existing$state == "CLOSED", ]
+
+      parts <- character(0)
+
+      if (nrow(open_issues) > 0) {
+        open_rows <- vapply(seq_len(nrow(open_issues)), function(i) {
+          render_row(open_issues[i, ])
+        }, character(1))
+        parts <- c(parts, sprintf(paste0(
+          "<div style='margin:6px 0;padding:6px 10px;background:#fefefe;",
+          "border:1px solid #e8e8e8;border-radius:3px;'>",
+          "<p style='font-size:0.85em;font-weight:bold;color:#28a745;margin-bottom:4px;'>",
+          "&#9679; Open issues (%d):</p>",
+          "<ul style='list-style:none;padding-left:0;margin:0;font-size:0.9em;'>%s</ul>",
+          "</div>"
+        ), nrow(open_issues), paste(open_rows, collapse = "\n")))
+      }
+
+      if (nrow(closed_issues) > 0) {
+        closed_id <- paste0(div_id, "_closed")
+        closed_rows <- vapply(seq_len(nrow(closed_issues)), function(i) {
+          render_row(closed_issues[i, ])
+        }, character(1))
+        parts <- c(parts, sprintf(paste0(
+          "<div style='margin:4px 0;'>",
+          "<a href='#' onclick=\"var el=document.getElementById('%s');",
+          "el.style.display=el.style.display==='none'?'block':'none';return false;\" ",
+          "style='font-size:0.85em;color:#6f42c1;text-decoration:none;cursor:pointer;'>",
+          "&#10003; Closed issues (%d) &#9662;</a>",
+          "<div id='%s' style='display:none;margin-top:4px;padding:6px 10px;",
+          "background:#fafafa;border:1px solid #e8e8e8;border-radius:3px;'>",
+          "<ul style='list-style:none;padding-left:0;margin:0;font-size:0.9em;'>%s</ul>",
+          "</div></div>"
+        ), closed_id, nrow(closed_issues), closed_id,
+          paste(closed_rows, collapse = "\n")))
+      }
+
+      html <- paste(parts, collapse = "\n")
     }
 
     session$sendCustomMessage("updateIssueList",
