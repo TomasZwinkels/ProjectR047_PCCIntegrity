@@ -8,11 +8,13 @@ source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_functions.R")
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_issue_functions.R")
 
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_unittests.R")
+# test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_issue_unittests.R") # It contains generative AI calls, so is slow, so commented out by default. 
 
 # Load data once at startup
 POLI <- read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";") |>
@@ -215,6 +217,114 @@ rese_detail_keys <- c(
   "parliaments_no_data", "snapshot_row", "snapshot_row"
 )
 
+# Render the issue path with an "Open new issue" button and inline form
+issue_path_tag <- function(path, auto_summary = "") {
+  form_id <- gsub("[^a-zA-Z0-9]", "_", path)
+  path_js <- gsub("'", "\\\\'", path)
+  settings_id <- paste0(form_id, "_settings")
+  auto_id <- paste0(form_id, "_auto")
+
+  tags$div(
+    tags$div(
+      style = "font-family:monospace; font-size:0.9em; color:#555; background:#f0f0f0; padding:4px 8px; border-left:3px solid #2874a6; margin-top:8px; margin-bottom:4px; display:flex; align-items:center; justify-content:space-between;",
+      tags$span(path),
+      tags$button(
+        "Open new issue",
+        class = "btn btn-sm btn-outline-primary",
+        style = "font-size:0.85em;",
+        onclick = sprintf(
+          "var el = document.getElementById('%s'); el.style.display = el.style.display === 'none' ? 'block' : 'none';",
+          form_id
+        )
+      )
+    ),
+    tags$div(
+      id = form_id,
+      style = "display:none; margin-top:8px; padding:10px; background:#fafafa; border:1px solid #ddd; border-radius:4px;",
+      tags$label("Title:", style = "font-weight:bold; display:block; margin-bottom:4px;"),
+      tags$input(
+        id = paste0(form_id, "_title"),
+        type = "text",
+        value = path,
+        style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.9em; margin-bottom:8px;"
+      ),
+      tags$label("Description:", style = "font-weight:bold; display:block; margin-bottom:4px;"),
+      tags$textarea(
+        id = paste0(form_id, "_text"),
+        rows = "4",
+        style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.9em;",
+        placeholder = "Describe the issue..."
+      ),
+      tags$label("Agent description:", style = "font-weight:bold; display:block; margin-top:8px; margin-bottom:4px; color:#666;"),
+      tags$textarea(
+        id = auto_id,
+        rows = "6",
+        auto_summary,
+        style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace; background:#f9f9f9; color:#444;"
+      ),
+      tags$div(
+        style = "margin-top:8px; display:flex; align-items:center; gap:8px;",
+        tags$button(
+          "Generate title and description with AI",
+          class = "btn btn-sm btn-outline-info",
+          title = "Use LLM to generate a title and description",
+          onclick = sprintf(
+            paste0(
+              "this.disabled = true; this.innerText = 'Generating...'; ",
+              "Shiny.setInputValue('llm_generate', {",
+              "path: '%s', ",
+              "auto_summary: document.getElementById('%s').value, ",
+              "title_id: '%s_title', ",
+              "desc_id: '%s_text', ",
+              "btn_id: this.id, ",
+              "nonce: Math.random()});"
+            ),
+            path_js, auto_id, form_id, form_id
+          ),
+          id = paste0(form_id, "_ai_btn")
+        ),
+        tags$button(
+          "Post issue on GitHub",
+          class = "btn btn-sm btn-success",
+          onclick = sprintf(
+            paste0(
+              "Shiny.setInputValue('post_github_issue', {",
+              "path: '%s', ",
+              "title: document.getElementById('%s_title').value, ",
+              "description: document.getElementById('%s_text').value + ",
+              "'\\n\\n---\\n\\n' + document.getElementById('%s').value, ",
+              "repo: document.getElementById('%s_repo').value, ",
+              "nonce: Math.random()});"
+            ),
+            path_js, form_id, form_id, auto_id, settings_id
+          )
+        ),
+        tags$button(
+          "\u2699",
+          class = "btn btn-sm btn-outline-secondary",
+          title = "GitHub settings",
+          style = "font-size:1.1em; padding:2px 8px;",
+          onclick = sprintf(
+            "var el = document.getElementById('%s'); el.style.display = el.style.display === 'none' ? 'block' : 'none';",
+            settings_id
+          )
+        )
+      ),
+      tags$div(
+        id = settings_id,
+        style = "display:none; margin-top:8px; padding:8px; background:#f5f5f5; border:1px solid #e0e0e0; border-radius:3px;",
+        tags$label("Repository:", style = "font-weight:bold; font-size:0.85em; display:block; margin-bottom:4px;"),
+        tags$input(
+          id = paste0(settings_id, "_repo"),
+          type = "text",
+          value = github_defaults$repo,
+          style = "width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace;"
+        )
+      )
+    )
+  )
+}
+
 run_parl_checks <- function(cc) {
   parl <- suppressMessages(preprocess_PARLdates(
     PARL[PARL$country_abb == cc, ]
@@ -316,15 +426,22 @@ checks_dt <- function(df) {
 }
 
 # Build the header tagList for a detail panel; the DT itself is injected by renderDT.
-detail_header_ui <- function(result, row_idx, key_vec, dt_output_id) {
+detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
+                             issue_path_str = NULL) {
   status <- result$table$Status[row_idx]
   label  <- result$table$Check[row_idx]
+
+  auto_summary <- if (!is.null(issue_path_str)) {
+    build_check_summary(result, row_idx, key_vec)
+  } else ""
+  path_tag <- if (!is.null(issue_path_str)) issue_path_tag(issue_path_str, auto_summary) else NULL
 
   if (status == "PASS") {
     return(tagList(
       tags$hr(),
       tags$p(style = "color:#28a745; font-weight:bold;",
-             paste0("\u2713 ", label, " — no issues found."))
+             paste0("\u2713 ", label, " — no issues found.")),
+      path_tag
     ))
   }
 
@@ -340,13 +457,24 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id) {
     if (n == 0)
       tags$p(style = "color:#666;", "(No problem rows returned by details function.)")
     else
-      DT::DTOutput(dt_output_id)
+      DT::DTOutput(dt_output_id),
+    path_tag
   )
 }
 
 # ---------------------------------------------------------------------------
 
 ui <- fluidPage(
+  tags$head(tags$script(HTML("
+    Shiny.addCustomMessageHandler('fillField', function(msg) {
+      var el = document.getElementById(msg.id);
+      if (el) el.value = msg.value;
+    });
+    Shiny.addCustomMessageHandler('resetButton', function(msg) {
+      var el = document.getElementById(msg.id);
+      if (el) { el.disabled = false; el.innerText = msg.label; }
+    });
+  "))),
   titlePanel("R047 PCC Data Dashboard"),
   fluidRow(
     column(2,
@@ -426,7 +554,8 @@ ui <- fluidPage(
       plotOutput("poli_plot"),
       uiOutput("poli_plot_note"),
       uiOutput("poli_missing_header"),
-      DT::DTOutput("poli_missing_dt")
+      DT::DTOutput("poli_missing_dt"),
+      uiOutput("poli_completeness_issue_path")
     )
   )
 )
@@ -445,6 +574,68 @@ server <- function(input, output, session) {
     showNotification("Default view saved.", type = "message", duration = 2)
   })
 
+  # --- LLM generation for issue title & description ---
+  observeEvent(input$llm_generate, {
+    info <- input$llm_generate
+    path <- info$path
+    auto_summary <- info$auto_summary
+    title_id <- info$title_id
+    desc_id  <- info$desc_id
+    btn_id   <- info$btn_id
+
+    withProgress(message = "Generating with AI...", value = 0.3, {
+      title <- llm_generate_title(path, auto_summary)
+      setProgress(0.6, detail = "Generating description...")
+      desc  <- llm_generate_description(path, auto_summary)
+    })
+
+    # Push results back into the form fields via JS
+    session$sendCustomMessage("fillField", list(id = title_id, value = title))
+    if (nchar(desc) > 0) {
+      session$sendCustomMessage("fillField", list(id = desc_id, value = desc))
+    }
+
+    # Re-enable the button
+    session$sendCustomMessage("resetButton",
+                              list(id = btn_id, label = "Generate title and description with AI"))
+
+    if (nchar(desc) > 0) {
+      showNotification("AI title and description generated.",
+                       type = "message", duration = 3)
+    } else {
+      showNotification("AI generated title only (description failed).",
+                       type = "warning", duration = 4)
+    }
+  })
+
+  # --- GitHub issue posting ---
+  observeEvent(input$post_github_issue, {
+    info <- input$post_github_issue
+    repo  <- trimws(info$repo)
+    title <- trimws(info$title)
+    desc  <- trimws(info$description)
+
+    if (title == "") {
+      showNotification("Issue title cannot be empty.", type = "error", duration = 4)
+      return()
+    }
+
+    labels <- issue_path_to_labels(info$path)
+    result <- gh_post_issue(repo, title, desc, labels)
+
+    if (result$success) {
+      showNotification(
+        paste0("Issue created: ", result$output),
+        type = "message", duration = 8
+      )
+    } else {
+      showNotification(
+        paste0("Failed to create issue: ", result$output),
+        type = "error", duration = 8
+      )
+    }
+  })
+
   rese_check_results <- reactive({
     run_rese_checks(input$country_select, input$date_range[1], input$date_range[2])
   })
@@ -461,8 +652,10 @@ server <- function(input, output, session) {
 
   output$rese_detail <- renderUI({
     req(input$rese_checks_rows_selected)
-    detail_header_ui(rese_check_results(), input$rese_checks_rows_selected,
-                     rese_detail_keys, "rese_detail_dt")
+    i <- input$rese_checks_rows_selected
+    path <- issue_path(input$country_select, "RESE", "check", rese_check_ids[i])
+    detail_header_ui(rese_check_results(), i, rese_detail_keys, "rese_detail_dt",
+                     issue_path_str = path)
   })
   output$rese_detail_dt <- DT::renderDT({
     req(input$rese_checks_rows_selected)
@@ -478,8 +671,10 @@ server <- function(input, output, session) {
 
   output$parl_detail <- renderUI({
     req(input$parl_checks_rows_selected)
-    detail_header_ui(parl_check_results(), input$parl_checks_rows_selected,
-                     parl_detail_keys, "parl_detail_dt")
+    i <- input$parl_checks_rows_selected
+    path <- issue_path(input$country_select, "PARL", "check", parl_check_ids[i])
+    detail_header_ui(parl_check_results(), i, parl_detail_keys, "parl_detail_dt",
+                     issue_path_str = path)
   })
   output$parl_detail_dt <- DT::renderDT({
     req(input$parl_checks_rows_selected)
@@ -495,8 +690,10 @@ server <- function(input, output, session) {
 
   output$meme_detail <- renderUI({
     req(input$meme_checks_rows_selected)
-    detail_header_ui(meme_check_results(), input$meme_checks_rows_selected,
-                     meme_detail_keys, "meme_detail_dt")
+    i <- input$meme_checks_rows_selected
+    path <- issue_path(input$country_select, "MEME", "check", meme_check_ids[i])
+    detail_header_ui(meme_check_results(), i, meme_detail_keys, "meme_detail_dt",
+                     issue_path_str = path)
   })
   output$meme_detail_dt <- DT::renderDT({
     req(input$meme_checks_rows_selected)
@@ -512,8 +709,10 @@ server <- function(input, output, session) {
 
   output$poli_check_detail <- renderUI({
     req(input$poli_checks_rows_selected)
-    detail_header_ui(poli_check_results(), input$poli_checks_rows_selected,
-                     poli_check_detail_keys, "poli_check_detail_dt")
+    i <- input$poli_checks_rows_selected
+    path <- issue_path(input$country_select, "POLI", "check", poli_check_ids[i])
+    detail_header_ui(poli_check_results(), i, poli_check_detail_keys, "poli_check_detail_dt",
+                     issue_path_str = path)
   })
   output$poli_check_detail_dt <- DT::renderDT({
     req(input$poli_checks_rows_selected)
@@ -694,6 +893,17 @@ server <- function(input, output, session) {
                         c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
                           "political_function", "parliament_id")]
 
+    # Determine parliament_id for the overcount episode (use midpoint)
+    ep_mid <- ep$start_date + as.integer((ep$end_date - ep$start_date) / 2)
+    parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
+                      PARL$assembly_abb == assembly_map[[cc]], ]
+    parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
+    parl_idx <- max(which(parl_cc$leg_period_start_date <= ep_mid), 0)
+    ep_parl_id <- if (parl_idx > 0) parl_cc$parliament_id[parl_idx] else "unknown"
+
+    path <- issue_path(cc, "RESE", "overcount", ep_parl_id)
+    auto_summary <- build_overcount_summary(ep, rese_ending)
+
     tagList(
       tags$hr(),
       tags$p(
@@ -719,7 +929,8 @@ server <- function(input, output, session) {
                                 order = list(list(0, "asc"))))
           )
         )
-      }
+      },
+      issue_path_tag(path, auto_summary)
     )
   })
 
@@ -978,6 +1189,18 @@ server <- function(input, output, session) {
     DT::datatable(missing[, show_cols, drop = FALSE], rownames = FALSE, filter = "top",
                   options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
                                 order = list(list(0, "asc"))))
+  })
+
+  output$poli_completeness_issue_path <- renderUI({
+    req(input$poli_completeness_rows_selected)
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
+    d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
+    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+    show_cols <- c("pers_id", intersect(c("last_name", "first_name"), names(missing)))
+    missing_preview <- missing[, show_cols, drop = FALSE]
+    auto_summary <- build_completeness_summary(selected_var, missing_preview)
+    path <- issue_path(input$country_select, "POLI", "completeness", selected_var)
+    issue_path_tag(path, auto_summary)
   })
 
 }
