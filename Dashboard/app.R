@@ -545,6 +545,12 @@ ui <- fluidPage(
       var el = document.getElementById(msg.div_id);
       if (el) el.innerHTML = msg.html;
     });
+    Shiny.addCustomMessageHandler('refreshIssueList', function(msg) {
+      Shiny.setInputValue('refresh_issues', {
+        labels: msg.labels, div_id: msg.div_id, repo: msg.repo,
+        nonce: Math.random()
+      });
+    });
   "))),
   titlePanel("R047 PCC Data Dashboard"),
   fluidRow(
@@ -794,6 +800,13 @@ server <- function(input, output, session) {
           }
         }
       }
+
+      # Refresh the existing issues list
+      path_labels <- issue_path_to_labels(info$path)
+      div_id <- paste0(gsub("[^a-zA-Z0-9]", "_", info$path), "_issues")
+      session$sendCustomMessage("refreshIssueList", list(
+        labels = path_labels, div_id = div_id, repo = repo
+      ))
     })
   })
 
