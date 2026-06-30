@@ -22,7 +22,8 @@ poli_check_ids <- c("persid_unique")
 
 # Default GitHub settings
 github_defaults <- list(
-  repo = "TomasZwinkels/PCCdata"
+  repo       = "TomasZwinkels/PCCdata",
+  asset_repo = "TomasZwinkels/pcc-issue-assets"
 )
 
 # Default label colours by hierarchy level (country, dataframe, issue_type, identifier)
@@ -73,7 +74,10 @@ build_check_summary <- function(detail_result, row_idx, key_vec) {
 }
 
 # Build auto-summary for completeness issues
-build_completeness_summary <- function(variable, missing_df) {
+# completeness_ts: optional data.frame with parliament_id, snapshot_day,
+#   pct_complete columns (the time series behind the graph)
+build_completeness_summary <- function(variable, missing_df,
+                                       completeness_ts = NULL) {
   n <- nrow(missing_df)
   lines <- c(
     paste0("**Variable:** `", variable, "`"),
@@ -84,12 +88,24 @@ build_completeness_summary <- function(variable, missing_df) {
                paste0("**First ", min(n, 10), " of ", n, " MPs:**"),
                "", df_to_md_table(missing_df))
   }
+  if (!is.null(completeness_ts) && nrow(completeness_ts) > 0) {
+    ts_display <- data.frame(
+      parliament = completeness_ts$parliament_id,
+      year       = format(completeness_ts$snapshot_day, "%Y"),
+      pct        = completeness_ts$pct_complete
+    )
+    lines <- c(lines, "",
+               "**Completeness over time (per parliament start):**",
+               "", df_to_md_table(ts_display, max_rows = 50))
+  }
   paste(lines, collapse = "\n")
 }
 
 # Build auto-summary for overcount episodes
 # Requires format_pcc_date() from R047_functions.R
-build_overcount_summary <- function(ep, rese_ending) {
+# all_episodes: optional data.frame with all overcount episodes for context
+build_overcount_summary <- function(ep, rese_ending,
+                                    all_episodes = NULL) {
   lines <- c(
     paste0("**Episode:** ", format_pcc_date(ep$start_date), " -- ",
            format_pcc_date(ep$end_date), " (", ep$duration_days, " days)"),
@@ -102,6 +118,19 @@ build_overcount_summary <- function(ep, rese_ending) {
                paste0("**RESE entries ending on ", format_pcc_date(ep$end_date),
                       " (", nrow(rese_ending), "):**"),
                "", df_to_md_table(rese_ending))
+  }
+  if (!is.null(all_episodes) && nrow(all_episodes) > 0) {
+    ep_display <- data.frame(
+      start      = sapply(all_episodes$start_date, format_pcc_date),
+      end        = sapply(all_episodes$end_date, format_pcc_date),
+      days       = all_episodes$duration_days,
+      peak       = paste0("+", all_episodes$peak_excess),
+      parl_size  = all_episodes$parliament_size
+    )
+    lines <- c(lines, "",
+               paste0("**All overcount episodes for this country (",
+                      nrow(all_episodes), "):**"),
+               "", df_to_md_table(ep_display, max_rows = 30))
   }
   paste(lines, collapse = "\n")
 }
@@ -130,7 +159,7 @@ gh_issue_create_cmd <- function(repo, title, body, labels) {
         "2>&1")
 }
 
-# Post a GitHub issue. Returns list(success, output).
+# Post a GitHub issue. Returns list(success, output, issue_number).
 gh_post_issue <- function(repo, title, body, labels) {
   gh_ensure_labels(labels, repo)
   cmd <- gh_issue_create_cmd(repo, title, body, labels)
@@ -139,10 +168,106 @@ gh_post_issue <- function(repo, title, body, labels) {
     error = function(e) e$message
   )
   out_text <- paste(out, collapse = "\n")
+  issue_number <- NA_integer_
+  if (grepl("github.com", out_text)) {
+    m <- regmatches(out_text, regexpr("/issues/([0-9]+)", out_text))
+    if (length(m) > 0) {
+      issue_number <- as.integer(sub("/issues/", "", m[1]))
+    }
+  }
   list(
-    success = grepl("github.com", out_text),
-    output  = out_text
+    success      = grepl("github.com", out_text),
+    output       = out_text,
+    issue_number = issue_number
   )
+}
+
+# --- Plot saving and image upload for GitHub issues ---
+
+# Save a ggplot object to a temporary PNG file. Returns the file path.
+save_issue_plot <- function(plot_obj, width = 10, height = 5, dpi = 150) {
+  tmp <- tempfile(fileext = ".png")
+  ggplot2::ggsave(tmp, plot = plot_obj,
+                  width = width, height = height, dpi = dpi)
+  tmp
+}
+
+# Build the image filename from issue path and issue number
+issue_image_filename <- function(issue_path_str, issue_number) {
+  sanitized <- gsub("[^a-zA-Z0-9_]", "_", issue_path_str)
+  sanitized <- gsub("_+", "_", sanitized)
+  sanitized <- gsub("^_|_$", "", sanitized)
+  paste0(sanitized, "_issue", issue_number, ".png")
+}
+
+# Upload an image file to a GitHub repo via the Contents API.
+# Returns the raw URL on success, or NULL on failure.
+gh_upload_image <- function(image_path, repo, target_filename) {
+  b64 <- base64enc::base64encode(image_path)
+  body_json <- jsonlite::toJSON(list(
+    message = paste("Add issue image:", target_filename),
+    content = b64
+  ), auto_unbox = TRUE)
+
+  body_file <- tempfile(fileext = ".json")
+  writeLines(body_json, body_file)
+
+  cmd <- paste(
+    "gh api",
+    "--method PUT",
+    paste0("repos/", repo, "/contents/", target_filename),
+    "--input", shQuote(body_file),
+    "--jq '.content.download_url'",
+    "2>/dev/null"
+  )
+  out <- tryCatch(
+    suppressWarnings(system(cmd, intern = TRUE)),
+    error = function(e) NULL
+  )
+  unlink(body_file)
+
+  if (is.null(out) || length(out) == 0 || !grepl("http", out[1])) {
+    return(NULL)
+  }
+  trimws(out[1])
+}
+
+# Append an image to an existing GitHub issue by editing its body.
+gh_append_image_to_issue <- function(repo, issue_number,
+                                     image_url, caption = "Graph") {
+  image_md <- paste0("\n\n![", caption, "](", image_url, ")")
+  cmd <- paste(
+    "gh issue edit", issue_number,
+    "--repo", shQuote(repo),
+    "--body-file -",
+    "2>/dev/null"
+  )
+  # Get current body, append image, pipe back
+  get_cmd <- paste(
+    "gh issue view", issue_number,
+    "--repo", shQuote(repo),
+    "--json body --jq '.body'",
+    "2>/dev/null"
+  )
+  current_body <- tryCatch(
+    suppressWarnings(system(get_cmd, intern = TRUE)),
+    error = function(e) NULL
+  )
+  if (is.null(current_body)) return(FALSE)
+
+  new_body <- paste0(paste(current_body, collapse = "\n"), image_md)
+  body_file <- tempfile(fileext = ".md")
+  writeLines(new_body, body_file)
+
+  edit_cmd <- paste(
+    "gh issue edit", issue_number,
+    "--repo", shQuote(repo),
+    "--body-file", shQuote(body_file),
+    "2>/dev/null"
+  )
+  exit <- system(edit_cmd, ignore.stdout = TRUE, ignore.stderr = TRUE)
+  unlink(body_file)
+  exit == 0
 }
 
 # --- LLM integration (OpenAI Codex CLI) ---

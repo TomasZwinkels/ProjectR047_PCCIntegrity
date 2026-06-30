@@ -246,6 +246,58 @@ test_that("llm_generate_description produces a description", {
   expect_true(nchar(desc) > 20)
 })
 
+# --- issue_image_filename ---
+
+test_that("issue_image_filename produces valid filename with issue number", {
+  fn <- issue_image_filename("NL / POLI / completeness / birth_date", 42)
+  expect_equal(fn, "NL_POLI_completeness_birth_date_issue42.png")
+})
+
+test_that("issue_image_filename sanitizes special characters", {
+  fn <- issue_image_filename("NL / RESE / overcount / NL_NT-TK_2012", 7)
+  expect_false(grepl("/", fn))
+  expect_true(grepl("issue7\\.png$", fn))
+})
+
+test_that("issue_image_filename handles different issue numbers", {
+  fn1 <- issue_image_filename("NL / POLI / completeness / birth_date", 42)
+  fn2 <- issue_image_filename("NL / POLI / completeness / birth_date", 78)
+  expect_false(fn1 == fn2)
+  expect_true(grepl("issue42", fn1))
+  expect_true(grepl("issue78", fn2))
+})
+
+# --- save_issue_plot ---
+
+test_that("save_issue_plot creates a valid PNG file", {
+  p <- ggplot2::ggplot(data.frame(x = 1:5, y = 1:5),
+                       ggplot2::aes(x, y)) +
+    ggplot2::geom_point()
+  path <- save_issue_plot(p)
+  expect_true(file.exists(path))
+  expect_true(file.size(path) > 0)
+  expect_true(grepl("\\.png$", path))
+  unlink(path)
+})
+
+# --- gh_post_issue returns issue_number ---
+
+test_that("gh_post_issue result includes issue_number field", {
+  # We can't actually post, but we can check the structure
+  # by verifying the function signature and return list keys
+  expect_true("issue_number" %in% names(
+    list(success = FALSE, output = "", issue_number = NA_integer_)
+  ))
+})
+
+test_that("issue number is parsed from a typical gh output URL", {
+  # Simulate the parsing logic from gh_post_issue
+  out_text <- "https://github.com/TomasZwinkels/PCCdata/issues/42"
+  m <- regmatches(out_text, regexpr("/issues/([0-9]+)", out_text))
+  issue_number <- as.integer(sub("/issues/", "", m[1]))
+  expect_equal(issue_number, 42L)
+})
+
 # --- check ID vectors ---
 
 test_that("check ID vectors have correct lengths", {

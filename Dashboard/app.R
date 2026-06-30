@@ -218,7 +218,7 @@ rese_detail_keys <- c(
 )
 
 # Render the issue path with an "Open new issue" button and inline form
-issue_path_tag <- function(path, auto_summary = "") {
+issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE) {
   form_id <- gsub("[^a-zA-Z0-9]", "_", path)
   path_js <- gsub("'", "\\\\'", path)
   settings_id <- paste0(form_id, "_settings")
@@ -255,12 +255,25 @@ issue_path_tag <- function(path, auto_summary = "") {
         style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.9em;",
         placeholder = "Describe the issue..."
       ),
-      tags$label("Agent description:", style = "font-weight:bold; display:block; margin-top:8px; margin-bottom:4px; color:#666;"),
+      tags$label("Technical details:", style = "font-weight:bold; display:block; margin-top:8px; margin-bottom:4px; color:#666;"),
       tags$textarea(
         id = auto_id,
         rows = "6",
         auto_summary,
         style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace; background:#f9f9f9; color:#444;"
+      ),
+      if (has_plot) tags$div(
+        style = "margin-top:6px;",
+        tags$label(
+          style = "font-size:0.9em; color:#555; cursor:pointer;",
+          tags$input(
+            type = "checkbox",
+            id = paste0(form_id, "_attach_plot"),
+            checked = "checked",
+            style = "margin-right:5px;"
+          ),
+          "Add completeness graph from above"
+        )
       ),
       tags$div(
         style = "margin-top:8px; display:flex; align-items:center; gap:8px;",
@@ -294,9 +307,12 @@ issue_path_tag <- function(path, auto_summary = "") {
               "description: document.getElementById('%s_text').value + ",
               "'\\n\\n---\\n\\n' + document.getElementById('%s').value, ",
               "repo: document.getElementById('%s_repo').value, ",
+              "asset_repo: document.getElementById('%s_asset_repo').value, ",
+              "has_plot: (function(){ var cb = document.getElementById('%s_attach_plot'); return cb ? cb.checked : false; })(), ",
               "nonce: Math.random()});"
             ),
-            path_js, form_id, form_id, auto_id, settings_id
+            path_js, form_id, form_id, auto_id, settings_id, settings_id,
+            form_id
           )
         ),
         tags$button(
@@ -313,11 +329,18 @@ issue_path_tag <- function(path, auto_summary = "") {
       tags$div(
         id = settings_id,
         style = "display:none; margin-top:8px; padding:8px; background:#f5f5f5; border:1px solid #e0e0e0; border-radius:3px;",
-        tags$label("Repository:", style = "font-weight:bold; font-size:0.85em; display:block; margin-bottom:4px;"),
+        tags$label("Issue repository:", style = "font-weight:bold; font-size:0.85em; display:block; margin-bottom:4px;"),
         tags$input(
           id = paste0(settings_id, "_repo"),
           type = "text",
           value = github_defaults$repo,
+          style = "width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace; margin-bottom:6px;"
+        ),
+        tags$label("Image asset repository:", style = "font-weight:bold; font-size:0.85em; display:block; margin-bottom:4px;"),
+        tags$input(
+          id = paste0(settings_id, "_asset_repo"),
+          type = "text",
+          value = github_defaults$asset_repo,
           style = "width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace;"
         )
       )
@@ -621,19 +644,54 @@ server <- function(input, output, session) {
     }
 
     labels <- issue_path_to_labels(info$path)
-    result <- gh_post_issue(repo, title, desc, labels)
+    has_plot <- isTRUE(info$has_plot)
+    asset_repo <- trimws(info$asset_repo)
 
-    if (result$success) {
+    withProgress(message = "Posting issue...", value = 0.3, {
+      result <- gh_post_issue(repo, title, desc, labels)
+
+      if (!result$success) {
+        showNotification(
+          paste0("Failed to create issue: ", result$output),
+          type = "error", duration = 8
+        )
+        return()
+      }
+
       showNotification(
         paste0("Issue created: ", result$output),
         type = "message", duration = 8
       )
-    } else {
-      showNotification(
-        paste0("Failed to create issue: ", result$output),
-        type = "error", duration = 8
-      )
-    }
+
+      # If a plot is available, upload it and append to the issue
+      if (has_plot && !is.na(result$issue_number)) {
+        plot_obj <- last_poli_plot()
+        if (!is.null(plot_obj)) {
+          setProgress(0.6, detail = "Uploading graph...")
+          png_path <- save_issue_plot(plot_obj)
+          filename <- issue_image_filename(info$path, result$issue_number)
+          image_url <- gh_upload_image(png_path, asset_repo, filename)
+          unlink(png_path)
+
+          if (!is.null(image_url)) {
+            setProgress(0.9, detail = "Attaching graph to issue...")
+            gh_append_image_to_issue(
+              repo, result$issue_number, image_url,
+              caption = "Completeness over time"
+            )
+            showNotification(
+              "Graph attached to issue.",
+              type = "message", duration = 4
+            )
+          } else {
+            showNotification(
+              "Issue created but graph upload failed.",
+              type = "warning", duration = 6
+            )
+          }
+        }
+      }
+    })
   })
 
   rese_check_results <- reactive({
@@ -727,6 +785,8 @@ server <- function(input, output, session) {
   })
 
   # --- Daily MP counts graph (RESE_MP tab) ---
+
+  last_poli_plot <- reactiveVal(NULL)
 
   daily_cache_version <- reactiveVal(0)
 
@@ -902,7 +962,8 @@ server <- function(input, output, session) {
     ep_parl_id <- if (parl_idx > 0) parl_cc$parliament_id[parl_idx] else "unknown"
 
     path <- issue_path(cc, "RESE", "overcount", ep_parl_id)
-    auto_summary <- build_overcount_summary(ep, rese_ending)
+    auto_summary <- build_overcount_summary(ep, rese_ending,
+                                             all_episodes = overcount_episodes())
 
     tagList(
       tags$hr(),
@@ -1135,7 +1196,7 @@ server <- function(input, output, session) {
       )
     }
 
-    p +
+    final_plot <- p +
       labs(
         title    = paste0("Completeness: ", selected_var, " \u2014 ", country_name),
         subtitle = "% of first-day cohort MPs for whom the variable is available; dashed red line = 97.5% target"
@@ -1145,6 +1206,9 @@ server <- function(input, output, session) {
         plot.background  = element_rect(fill = "white", color = NA),
         panel.background = element_rect(fill = "white", color = NA)
       )
+
+    last_poli_plot(final_plot)
+    final_plot
   })
 
   output$poli_plot_note <- renderUI({
@@ -1198,9 +1262,27 @@ server <- function(input, output, session) {
     missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
     show_cols <- c("pers_id", intersect(c("last_name", "first_name"), names(missing)))
     missing_preview <- missing[, show_cols, drop = FALSE]
-    auto_summary <- build_completeness_summary(selected_var, missing_preview)
+
+    # Build completeness time series for the LLM
+    ch <- cohort()
+    completeness_ts <- NULL
+    if (!is.null(ch)) {
+      cohort_poli <- ch |>
+        left_join(POLI[, c("pers_id", selected_var)], by = "pers_id") |>
+        mutate(available = !is.na(.data[[selected_var]]) & .data[[selected_var]] != "")
+      completeness_ts <- cohort_poli |>
+        group_by(parliament_id, snapshot_day) |>
+        summarise(pct_complete = round(100 * mean(available), 1),
+                  .groups = "drop") |>
+        filter(snapshot_day >= input$date_range[1],
+               snapshot_day <= input$date_range[2]) |>
+        arrange(snapshot_day)
+    }
+
+    auto_summary <- build_completeness_summary(selected_var, missing_preview,
+                                               completeness_ts)
     path <- issue_path(input$country_select, "POLI", "completeness", selected_var)
-    issue_path_tag(path, auto_summary)
+    issue_path_tag(path, auto_summary, has_plot = TRUE)
   })
 
 }
