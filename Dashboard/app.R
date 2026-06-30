@@ -645,6 +645,11 @@ server <- function(input, output, session) {
     showNotification("Default view saved.", type = "message", duration = 2)
   })
 
+  # --- Open URL in system browser (works inside VS Code viewer) ---
+  observeEvent(input$open_url, {
+    browseURL(input$open_url$url)
+  })
+
   # --- Refresh existing issues list (triggered by label checkbox changes) ---
   observeEvent(input$refresh_issues, {
     info <- input$refresh_issues
@@ -670,14 +675,14 @@ server <- function(input, output, session) {
         sprintf(paste0(
           "<li style='margin-bottom:3px;'>",
           "<span style='color:%s; margin-right:4px;'>%s</span>",
-          "<a href='%s' target='_blank' ",
-          "onclick=\"window.open('%s','_blank');return false;\" ",
+          "<a href='#' ",
+          "onclick=\"Shiny.setInputValue('open_url',{url:'%s',nonce:Math.random()});return false;\" ",
           "style='text-decoration:none;color:#0366d6;cursor:pointer;'>",
           "#%d %s</a> ",
           "<span style='color:#999;font-size:0.85em;'>[%s]</span> ",
           "<span style='color:#aaa;font-size:0.75em;'>%s</span>",
           "</li>"
-        ), color, icon, row$url, row$url, row$number,
+        ), color, icon, row$url, row$number,
           htmltools::htmlEscape(row$title), tolower(row$state), row$url)
       }, character(1))
 
