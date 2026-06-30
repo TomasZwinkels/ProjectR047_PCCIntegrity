@@ -128,11 +128,51 @@ build_overcount_summary <- function(ep, rese_ending,
       parl_size  = all_episodes$parliament_size
     )
     lines <- c(lines, "",
-               paste0("**All overcount episodes for this country (",
+               paste0("**All overcount episodes for this parliament (",
                       nrow(all_episodes), "):**"),
                "", df_to_md_table(ep_display, max_rows = 30))
   }
   paste(lines, collapse = "\n")
+}
+
+# Query GitHub issues matching the given labels.
+# Can pass either an issue_path_str (split into labels) or a labels vector.
+# Returns a data.frame with number, title, state, url (or empty df on failure).
+gh_list_issues <- function(repo, issue_path_str = NULL, labels = NULL) {
+  if (is.null(labels)) labels <- issue_path_to_labels(issue_path_str)
+  label_flags <- paste("--label", shQuote(labels), collapse = " ")
+  cmd <- paste(
+    "gh issue list",
+    "--repo", shQuote(repo),
+    "--state all",
+    label_flags,
+    "--json number,title,state,url",
+    "--limit 50",
+    "2>/dev/null"
+  )
+  out <- tryCatch(
+    suppressWarnings(system(cmd, intern = TRUE)),
+    error = function(e) NULL
+  )
+  if (is.null(out) || length(out) == 0) {
+    return(data.frame(number = integer(0), title = character(0),
+                      state = character(0), url = character(0),
+                      stringsAsFactors = FALSE))
+  }
+  json_text <- paste(out, collapse = "\n")
+  tryCatch({
+    df <- jsonlite::fromJSON(json_text)
+    if (length(df) == 0 || nrow(df) == 0) {
+      return(data.frame(number = integer(0), title = character(0),
+                        state = character(0), url = character(0),
+                        stringsAsFactors = FALSE))
+    }
+    df[, c("number", "title", "state", "url")]
+  }, error = function(e) {
+    data.frame(number = integer(0), title = character(0),
+               state = character(0), url = character(0),
+               stringsAsFactors = FALSE)
+  })
 }
 
 # Ensure GitHub labels exist on a repo (one per hierarchy level)

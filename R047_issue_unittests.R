@@ -178,6 +178,36 @@ test_that("gh_issue_create_cmd builds valid command string", {
   expect_true(grepl("2>&1$", cmd))
 })
 
+# --- gh_list_issues ---
+
+test_that("gh_list_issues returns empty data.frame for nonexistent labels", {
+  df <- gh_list_issues("TomasZwinkels/PCCdata",
+                       "XX / FAKE / check / nonexistent_label_xyz")
+  expect_true(is.data.frame(df))
+  expect_equal(nrow(df), 0)
+  expect_true(all(c("number", "title", "state", "url") %in% names(df)))
+})
+
+test_that("gh_list_issues returns correct columns for existing issues", {
+  # This relies on the birth_place_raw issue we created earlier
+  df <- gh_list_issues("TomasZwinkels/PCCdata",
+                       "NL / POLI / completeness / birth_place_raw")
+  expect_true(is.data.frame(df))
+  expect_true(all(c("number", "title", "state", "url") %in% names(df)))
+  if (nrow(df) > 0) {
+    expect_true(is.integer(df$number) || is.numeric(df$number))
+    expect_true(all(df$state %in% c("OPEN", "CLOSED")))
+    expect_true(all(grepl("github.com", df$url)))
+  }
+})
+
+test_that("gh_list_issues handles gracefully when repo doesn't exist", {
+  df <- gh_list_issues("nonexistent/repo_xyz_999",
+                       "NL / POLI / completeness / birth_date")
+  expect_true(is.data.frame(df))
+  expect_equal(nrow(df), 0)
+})
+
 # --- LLM prompt builders ---
 
 test_that("build_title_prompt includes issue path and summary", {

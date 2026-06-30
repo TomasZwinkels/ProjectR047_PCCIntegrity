@@ -218,24 +218,68 @@ rese_detail_keys <- c(
 )
 
 # Render the issue path with an "Open new issue" button and inline form
-issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE) {
+issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
+                           repo = github_defaults$repo) {
   form_id <- gsub("[^a-zA-Z0-9]", "_", path)
   path_js <- gsub("'", "\\\\'", path)
   settings_id <- paste0(form_id, "_settings")
   auto_id <- paste0(form_id, "_auto")
 
+  labels <- issue_path_to_labels(path)
+  label_names <- c("country", "dataframe", "type", "identifier")
+  issues_div_id <- paste0(form_id, "_issues")
+
+  # Build label checkboxes with a JS function to re-query
+  refresh_js <- sprintf(paste0(
+    "var cbs = document.querySelectorAll('.%s_label_cb'); ",
+    "var sel = []; ",
+    "cbs.forEach(function(cb){ if(cb.checked) sel.push(cb.value); }); ",
+    "Shiny.setInputValue('refresh_issues', {",
+    "labels: sel, div_id: '%s', repo: document.getElementById('%s_repo').value || '%s', ",
+    "nonce: Math.random()});"
+  ), form_id, issues_div_id, settings_id, repo)
+
+  label_checkboxes <- lapply(seq_along(labels), function(i) {
+    cb_class <- paste0(form_id, "_label_cb")
+    tags$label(
+      style = "font-size:0.85em; color:#555; cursor:pointer; margin-right:10px;",
+      tags$input(
+        type = "checkbox",
+        class = cb_class,
+        value = labels[i],
+        checked = "checked",
+        style = "margin-right:3px;",
+        onchange = refresh_js
+      ),
+      tags$span(style = "font-family:monospace;", labels[i])
+    )
+  })
+
+  # Initial query with all labels
+  existing <- gh_list_issues(repo, labels = labels)
+
   tags$div(
     tags$div(
-      style = "font-family:monospace; font-size:0.9em; color:#555; background:#f0f0f0; padding:4px 8px; border-left:3px solid #2874a6; margin-top:8px; margin-bottom:4px; display:flex; align-items:center; justify-content:space-between;",
-      tags$span(path),
-      tags$button(
-        "Open new issue",
-        class = "btn btn-sm btn-outline-primary",
-        style = "font-size:0.85em;",
-        onclick = sprintf(
-          "var el = document.getElementById('%s'); el.style.display = el.style.display === 'none' ? 'block' : 'none';",
-          form_id
-        )
+      style = "font-family:monospace; font-size:0.9em; color:#555; background:#f0f0f0; padding:4px 8px; border-left:3px solid #2874a6; margin-top:8px; margin-bottom:4px;",
+      tags$span(path)
+    ),
+    tags$div(
+      style = "margin-top:4px; margin-bottom:4px;",
+      tags$span(style = "font-size:0.8em; color:#888; margin-right:6px;", "Filter labels:"),
+      label_checkboxes
+    ),
+    tags$div(id = issues_div_id),
+    tags$script(HTML(sprintf(
+      "Shiny.setInputValue('refresh_issues', {labels: %s, div_id: '%s', repo: '%s', nonce: Math.random()});",
+      jsonlite::toJSON(labels), issues_div_id, repo
+    ))),
+    tags$button(
+      "Open new issue",
+      class = "btn btn-sm btn-outline-primary",
+      style = "font-size:0.85em; margin-top:4px; margin-bottom:4px;",
+      onclick = sprintf(
+        "var el = document.getElementById('%s'); el.style.display = el.style.display === 'none' ? 'block' : 'none';",
+        form_id
       )
     ),
     tags$div(
@@ -497,6 +541,10 @@ ui <- fluidPage(
       var el = document.getElementById(msg.id);
       if (el) { el.disabled = false; el.innerText = msg.label; }
     });
+    Shiny.addCustomMessageHandler('updateIssueList', function(msg) {
+      var el = document.getElementById(msg.div_id);
+      if (el) el.innerHTML = msg.html;
+    });
   "))),
   titlePanel("R047 PCC Data Dashboard"),
   fluidRow(
@@ -595,6 +643,56 @@ server <- function(input, output, session) {
       tab       = input$main_tabs
     ), defaults_file)
     showNotification("Default view saved.", type = "message", duration = 2)
+  })
+
+  # --- Refresh existing issues list (triggered by label checkbox changes) ---
+  observeEvent(input$refresh_issues, {
+    info <- input$refresh_issues
+    labels <- unlist(info$labels)
+    div_id <- info$div_id
+    repo   <- info$repo
+
+    if (length(labels) == 0) {
+      session$sendCustomMessage("updateIssueList",
+                                list(div_id = div_id, html = ""))
+      return()
+    }
+
+    existing <- gh_list_issues(repo, labels = labels)
+
+    if (nrow(existing) == 0) {
+      html <- "<p style='font-size:0.85em; color:#999; margin:4px 0;'>No matching issues found.</p>"
+    } else {
+      rows_html <- vapply(seq_len(nrow(existing)), function(i) {
+        row <- existing[i, ]
+        icon <- if (row$state == "OPEN") "&#9679;" else "&#10003;"
+        color <- if (row$state == "OPEN") "#28a745" else "#6f42c1"
+        sprintf(paste0(
+          "<li style='margin-bottom:3px;'>",
+          "<span style='color:%s; margin-right:4px;'>%s</span>",
+          "<a href='%s' target='_blank' ",
+          "onclick=\"window.open('%s','_blank');return false;\" ",
+          "style='text-decoration:none;color:#0366d6;cursor:pointer;'>",
+          "#%d %s</a> ",
+          "<span style='color:#999;font-size:0.85em;'>[%s]</span> ",
+          "<span style='color:#aaa;font-size:0.75em;'>%s</span>",
+          "</li>"
+        ), color, icon, row$url, row$url, row$number,
+          htmltools::htmlEscape(row$title), tolower(row$state), row$url)
+      }, character(1))
+
+      html <- sprintf(paste0(
+        "<div style='margin:6px 0;padding:6px 10px;background:#fefefe;",
+        "border:1px solid #e8e8e8;border-radius:3px;'>",
+        "<p style='font-size:0.85em;font-weight:bold;color:#555;margin-bottom:4px;'>",
+        "Existing issues (%d):</p>",
+        "<ul style='list-style:none;padding-left:0;margin:0;font-size:0.9em;'>%s</ul>",
+        "</div>"
+      ), nrow(existing), paste(rows_html, collapse = "\n"))
+    }
+
+    session$sendCustomMessage("updateIssueList",
+                              list(div_id = div_id, html = html))
   })
 
   # --- LLM generation for issue title & description ---
@@ -787,6 +885,7 @@ server <- function(input, output, session) {
   # --- Daily MP counts graph (RESE_MP tab) ---
 
   last_poli_plot <- reactiveVal(NULL)
+  clicked_episode <- reactiveVal(NULL)
 
   daily_cache_version <- reactiveVal(0)
 
@@ -925,26 +1024,34 @@ server <- function(input, output, session) {
     episodes
   })
 
-  output$overcount_detail <- renderUI({
-    req(input$daily_plot_click)
+  # Capture plot click into a stable reactiveVal (survives plot re-renders)
+  observeEvent(input$daily_plot_click, {
     eps <- overcount_episodes()
-    if (is.null(eps) || nrow(eps) == 0) return(NULL)
+    if (is.null(eps) || nrow(eps) == 0) return()
 
     clicked_date <- as.Date(input$daily_plot_click$x, origin = "1970-01-01")
-
-    # Distance from click to each episode (0 if inside)
     dist_to_ep <- pmax(
       as.numeric(eps$start_date - clicked_date),
-      as.numeric(clicked_date - eps$end_date),
-      0
+      as.numeric(clicked_date - eps$end_date), 0
     )
     nearest <- which.min(dist_to_ep)
-    if (dist_to_ep[nearest] > 365) return(NULL)
+    if (dist_to_ep[nearest] > 365) return()
 
-    ep <- eps[nearest, ]
+    clicked_episode(list(
+      ep       = eps[nearest, ],
+      country  = input$country_select
+    ))
+  })
 
-    # Find RESE entries ending on the episode end date
-    cc <- input$country_select
+  # Clear clicked episode when country changes
+  observeEvent(input$country_select, { clicked_episode(NULL) })
+
+  output$overcount_detail <- renderUI({
+    info <- clicked_episode()
+    req(!is.null(info))
+
+    ep <- info$ep
+    cc <- info$country
     rese_ending <- RESE[RESE$country_abb == cc &
                           RESE$political_function %in%
                             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
@@ -961,9 +1068,21 @@ server <- function(input, output, session) {
     parl_idx <- max(which(parl_cc$leg_period_start_date <= ep_mid), 0)
     ep_parl_id <- if (parl_idx > 0) parl_cc$parliament_id[parl_idx] else "unknown"
 
+    # Filter episodes to this parliament's period
+    all_eps <- overcount_episodes()
+    parl_episodes <- NULL
+    if (!is.null(all_eps) && parl_idx > 0) {
+      parl_start <- parl_cc$leg_period_start_date[parl_idx]
+      parl_end <- if (parl_idx < nrow(parl_cc)) {
+        parl_cc$leg_period_start_date[parl_idx + 1] - 1
+      } else Sys.Date()
+      parl_episodes <- all_eps[
+        all_eps$start_date >= parl_start & all_eps$start_date <= parl_end, ]
+    }
+
     path <- issue_path(cc, "RESE", "overcount", ep_parl_id)
     auto_summary <- build_overcount_summary(ep, rese_ending,
-                                             all_episodes = overcount_episodes())
+                                             all_episodes = parl_episodes)
 
     tagList(
       tags$hr(),
@@ -984,15 +1103,30 @@ server <- function(input, output, session) {
           tags$p(style = "font-weight:bold; margin-top:8px;",
                  paste0("RESE entries ending on ", format_pcc_date(ep$end_date),
                         " (", nrow(rese_ending), "):")),
-          DT::renderDataTable(
-            DT::datatable(rese_ending, rownames = FALSE,
-                          options = list(scrollX = TRUE, pageLength = 10, dom = "tip",
-                                order = list(list(0, "asc"))))
-          )
+          DT::DTOutput("overcount_rese_dt")
         )
       },
       issue_path_tag(path, auto_summary)
     )
+  })
+
+  output$overcount_rese_dt <- DT::renderDT({
+    info <- clicked_episode()
+    req(!is.null(info))
+
+    ep <- info$ep
+    cc <- info$country
+    rese_ending <- RESE[RESE$country_abb == cc &
+                          RESE$political_function %in%
+                            c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
+                          !is.na(RESE$end_date) &
+                          RESE$end_date == ep$end_date,
+                        c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
+                          "political_function", "parliament_id")]
+    req(nrow(rese_ending) > 0)
+    DT::datatable(rese_ending, rownames = FALSE,
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "tip",
+                                order = list(list(0, "asc"))))
   })
 
   # --- POLI tab ---
