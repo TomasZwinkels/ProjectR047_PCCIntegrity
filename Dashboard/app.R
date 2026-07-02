@@ -218,9 +218,11 @@ rese_detail_keys <- c(
   "parliaments_no_data", "snapshot_row", "snapshot_row"
 )
 
-# Render the issue path with an "Open new issue" button and inline form
+# Render the issue path with an "Open new issue" button and inline form.
+# table_key: non-NULL when the panel has a problem table that can be uploaded
+# as a CSV attachment; the key selects the table in issue_table_sources.
 issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
-                           repo = github_defaults$repo) {
+                           repo = github_defaults$repo, table_key = NULL) {
   form_id <- gsub("[^a-zA-Z0-9]", "_", path)
   path_js <- gsub("'", "\\\\'", path)
   settings_id <- paste0(form_id, "_settings")
@@ -320,6 +322,19 @@ issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
           "Add completeness graph from above"
         )
       ),
+      if (!is.null(table_key)) tags$div(
+        style = "margin-top:6px;",
+        tags$label(
+          style = "font-size:0.9em; color:#555; cursor:pointer;",
+          tags$input(
+            type = "checkbox",
+            id = paste0(form_id, "_attach_table"),
+            checked = "checked",
+            style = "margin-right:5px;"
+          ),
+          "Attach problem table (CSV, shown columns, all rows)"
+        )
+      ),
       tags$div(
         style = "margin-top:8px; display:flex; align-items:center; gap:8px;",
         tags$button(
@@ -354,10 +369,12 @@ issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
               "repo: document.getElementById('%s_repo').value, ",
               "asset_repo: document.getElementById('%s_asset_repo').value, ",
               "has_plot: (function(){ var cb = document.getElementById('%s_attach_plot'); return cb ? cb.checked : false; })(), ",
+              "table_key: '%s', ",
+              "attach_table: (function(){ var cb = document.getElementById('%s_attach_table'); return cb ? cb.checked : false; })(), ",
               "nonce: Math.random()});"
             ),
             path_js, form_id, form_id, auto_id, settings_id, settings_id,
-            form_id
+            form_id, if (is.null(table_key)) "" else table_key, form_id
           )
         ),
         tags$button(
@@ -493,16 +510,29 @@ checks_dt <- function(df) {
     )
 }
 
-# Build the header tagList for a detail panel; the DT itself is injected by renderDT.
+# Build the header tagList for a detail panel; the DT itself is injected by
+# renderDT. cols_input_id/col_choices/col_selected add a column-selector above
+# the table (curated default view; the user can add hidden columns back).
 detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
-                             issue_path_str = NULL, download_id = NULL) {
+                             issue_path_str = NULL, download_id = NULL,
+                             cols_input_id = NULL, col_choices = NULL,
+                             col_selected = NULL, table_key = NULL) {
   status <- result$table$Status[row_idx]
   label  <- result$table$Check[row_idx]
 
   auto_summary <- if (!is.null(issue_path_str)) {
     build_check_summary(result, row_idx, key_vec)
   } else ""
-  path_tag <- if (!is.null(issue_path_str)) issue_path_tag(issue_path_str, auto_summary) else NULL
+
+  det <- result$details[[row_idx]]
+  df  <- det[[key_vec[row_idx]]]
+  n   <- if (!is.null(df)) nrow(df) else 0
+
+  path_tag <- if (!is.null(issue_path_str)) {
+    issue_path_tag(issue_path_str, auto_summary,
+                   # CSV attachment only offered when there is a table to attach
+                   table_key = if (status == "FAIL" && n > 0) table_key)
+  }
 
   if (status == "PASS") {
     return(tagList(
@@ -513,10 +543,6 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
     ))
   }
 
-  det <- result$details[[row_idx]]
-  df  <- det[[key_vec[row_idx]]]
-  n   <- if (!is.null(df)) nrow(df) else 0
-
   tagList(
     tags$hr(),
     tags$p(style = "font-weight:bold; color:#c0392b;",
@@ -526,11 +552,16 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
       tags$p(style = "color:#666;", "(No problem rows returned by details function.)")
     else
       tagList(
+        if (!is.null(cols_input_id) && !is.null(col_choices))
+          selectizeInput(cols_input_id, "Columns shown",
+                         choices = col_choices, selected = col_selected,
+                         multiple = TRUE, width = "100%",
+                         options = list(plugins = list("remove_button"))),
+        DT::DTOutput(dt_output_id),
         if (!is.null(download_id))
-          downloadButton(download_id, "Export CSV",
+          downloadButton(download_id, "Export physical table",
                          class = "btn-sm btn-outline-secondary",
-                         style = "margin-bottom:6px;"),
-        DT::DTOutput(dt_output_id)
+                         style = "margin-top:6px;")
       ),
     path_tag
   )
@@ -811,7 +842,7 @@ server <- function(input, output, session) {
           setProgress(0.6, detail = "Uploading graph...")
           png_path <- save_issue_plot(plot_obj)
           filename <- issue_image_filename(info$path, result$issue_number)
-          image_url <- gh_upload_image(png_path, asset_repo, filename)
+          image_url <- gh_upload_asset(png_path, asset_repo, filename)
           unlink(png_path)
 
           if (!is.null(image_url)) {
@@ -830,6 +861,47 @@ server <- function(input, output, session) {
               type = "warning", duration = 6
             )
           }
+        }
+      }
+
+      # Attach the problem table (displayed columns x ALL rows) as a CSV in the
+      # asset repo and link it in the issue body. The filename is deterministic
+      # (<sanitized path>_issue<N>.csv) so coding agents can find the data from
+      # the issue alone.
+      if (isTRUE(info$attach_table) && nzchar(info$table_key) &&
+          !is.na(result$issue_number)) {
+        snapshot <- issue_table_sources[[info$table_key]]
+        df <- if (!is.null(snapshot)) {
+          tryCatch(snapshot(), error = function(e) NULL)  # req()/freeze guards
+        }
+        if (!is.null(df) && nrow(df) > 0) {
+          setProgress(0.7, detail = "Uploading problem table...")
+          csv_path <- tempfile(fileext = ".csv")
+          write_pcc_csv(df, csv_path)
+          csv_filename <- issue_asset_filename(info$path, result$issue_number,
+                                               "csv")
+          csv_url <- gh_upload_asset(csv_path, asset_repo, csv_filename)
+          unlink(csv_path)
+
+          if (!is.null(csv_url)) {
+            setProgress(0.95, detail = "Linking problem table in issue...")
+            gh_append_data_link_to_issue(repo, result$issue_number,
+                                         csv_url, csv_filename, nrow(df))
+            showNotification(
+              paste0("Problem table attached (", nrow(df), " rows)."),
+              type = "message", duration = 4
+            )
+          } else {
+            showNotification(
+              "Issue created but problem-table upload failed.",
+              type = "warning", duration = 6
+            )
+          }
+        } else {
+          showNotification(
+            "Issue created but the problem table could not be read.",
+            type = "warning", duration = 6
+          )
         }
       }
 
@@ -870,10 +942,83 @@ server <- function(input, output, session) {
       df
     })
   }
-  detail_dt <- function(df) {
-    DT::datatable(df, rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
+  # Wire one problem-row table: a column-selector-driven DT plus an export that
+  # reproduces exactly the visible columns x filtered rows in sort order.
+  # aug_df: reactive returning the (POLI-id-augmented) data frame — row identity
+  #   is frozen here, so DT's rows_all indices stay valid across column changes.
+  # default_cols: reactive returning the curated default column set.
+  # reset_events: reactive whose change means "this is a different table now" —
+  #   resets the selector (via freeze) and the remembered filter state.
+  # Returns a list:
+  #   export   — content function for the table's downloadHandler
+  #              (displayed columns x filtered rows: the physical table)
+  #   snapshot — reactive: displayed columns x ALL rows (filters ignored);
+  #              the GitHub-issue CSV attachment, so a forgotten on-screen
+  #              filter can never truncate the evidence an agent relies on
+  wire_curated_dt <- function(aug_df, default_cols, dt_id, cols_input_id,
+                              reset_events) {
+    state <- reactiveValues(global = "", filters = list())
+
+    observeEvent(reset_events(), {
+      # Suppress one render with the previous table's stale column selection
+      # while the rebuilt selectize widget reports its fresh defaults.
+      freezeReactiveValue(input, cols_input_id)
+      state$global  <- ""          # never leak filters across different dfs
+      state$filters <- list()
+    }, ignoreInit = TRUE)
+
+    displayed_cols <- reactive({
+      avail <- names(aug_df())
+      sel   <- input[[cols_input_id]]
+      cols  <- sel[sel %in% avail]   # keep the selection's order: matches the
+                                     # curated default order on first render, and
+                                     # columns the user adds appear at the end
+      if (length(cols) == 0) cols <- default_cols()
+      cols
+    })
+
+    # Remember global search and per-column filters (keyed by column NAME —
+    # positions shift when columns are added/removed) so they survive the
+    # re-render caused by a column change.
+    observeEvent(input[[paste0(dt_id, "_search")]], {
+      state$global <- input[[paste0(dt_id, "_search")]]
+    }, ignoreInit = TRUE)
+    observeEvent(input[[paste0(dt_id, "_search_columns")]], {
+      v    <- input[[paste0(dt_id, "_search_columns")]]
+      cols <- isolate(displayed_cols())
+      if (length(v) == length(cols))     # skip transient mid-rerender mismatches
+        state$filters <- setNames(as.list(v), cols)
+    }, ignoreInit = TRUE)
+
+    output[[dt_id]] <- DT::renderDT({
+      cols <- displayed_cols()
+      df   <- aug_df()[, cols, drop = FALSE]
+      opts <- list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                   order = list(list(0, "asc")))
+      # isolate: typing in a filter box mutates `state`; without isolate that
+      # would re-render the table and wipe the very filter being typed.
+      st <- isolate(list(g = state$global, f = state$filters))
+      if (nzchar(st$g)) opts$search <- list(search = st$g)
+      sc <- lapply(cols, function(nm) {
+        s <- st$f[[nm]]
+        if (!is.null(s) && nzchar(s)) list(search = s) else NULL
+      })
+      if (!all(vapply(sc, is.null, logical(1)))) opts$searchCols <- sc
+      DT::datatable(df, rownames = FALSE, filter = "top", options = opts)
+    })
+
+    list(
+      # downloadHandler content: the "physical table" the user is looking at.
+      export = function(file) {
+        df   <- aug_df()
+        cols <- displayed_cols()
+        rows <- input[[paste0(dt_id, "_rows_all")]]
+        if (is.null(rows)) rows <- seq_len(nrow(df))  # DT not yet reported
+        rows <- clamp_export_rows(rows, nrow(df))     # stale-index race guard
+        write_pcc_csv(df[rows, cols, drop = FALSE], file)
+      },
+      snapshot = reactive(aug_df()[, displayed_cols(), drop = FALSE])
+    )
   }
 
   rese_detail_df <- make_detail_df(rese_check_results, rese_detail_keys,
@@ -885,60 +1030,136 @@ server <- function(input, output, session) {
   poli_check_detail_df <- make_detail_df(poli_check_results, poli_check_detail_keys,
                                    function() input$poli_checks_rows_selected)
 
+  # Augmented detail frames: country id_<cc>_* columns joined in via pers_id so
+  # they are available in the column selector (default-on for POLI tables only).
+  rese_aug_df <- reactive(join_poli_ids(rese_detail_df(), POLI, input$country_select))
+  parl_aug_df <- reactive(join_poli_ids(parl_detail_df(), POLI, input$country_select))
+  meme_aug_df <- reactive(join_poli_ids(meme_detail_df(), POLI, input$country_select))
+  poli_check_aug_df <- reactive(
+    join_poli_ids(poli_check_detail_df(), POLI, input$country_select))
+
+  rese_default_cols <- reactive({
+    i <- req(input$rese_checks_rows_selected)
+    default_detail_cols("RESE", rese_check_ids[i], names(rese_aug_df()),
+                        country_id_cols(names(POLI), input$country_select))
+  })
+  parl_default_cols <- reactive({
+    i <- req(input$parl_checks_rows_selected)
+    default_detail_cols("PARL", parl_check_ids[i], names(parl_aug_df()),
+                        country_id_cols(names(POLI), input$country_select))
+  })
+  meme_default_cols <- reactive({
+    i <- req(input$meme_checks_rows_selected)
+    default_detail_cols("MEME", meme_check_ids[i], names(meme_aug_df()),
+                        country_id_cols(names(POLI), input$country_select))
+  })
+  poli_check_default_cols <- reactive({
+    i <- req(input$poli_checks_rows_selected)
+    default_detail_cols("POLI", poli_check_ids[i], names(poli_check_aug_df()),
+                        country_id_cols(names(POLI), input$country_select))
+  })
+
+  rese_table <- wire_curated_dt(
+    rese_aug_df, rese_default_cols, "rese_detail_dt", "rese_detail_cols",
+    reset_events = reactive(list(input$rese_checks_rows_selected,
+                                 input$country_select, input$date_range)))
+  parl_table <- wire_curated_dt(
+    parl_aug_df, parl_default_cols, "parl_detail_dt", "parl_detail_cols",
+    reset_events = reactive(list(input$parl_checks_rows_selected,
+                                 input$country_select)))
+  meme_table <- wire_curated_dt(
+    meme_aug_df, meme_default_cols, "meme_detail_dt", "meme_detail_cols",
+    reset_events = reactive(list(input$meme_checks_rows_selected,
+                                 input$country_select, input$date_range)))
+  poli_check_table <- wire_curated_dt(
+    poli_check_aug_df, poli_check_default_cols,
+    "poli_check_detail_dt", "poli_check_detail_cols",
+    reset_events = reactive(list(input$poli_checks_rows_selected,
+                                 input$country_select)))
+
+  # TRUE when the selected check row FAILed with >0 problem rows — only then do
+  # the aug/default reactives resolve (they req() a non-empty FAIL df), so the
+  # renderUIs below must not touch them otherwise or the whole panel vanishes.
+  detail_has_rows <- function(result, i, keys) {
+    if (result$table$Status[i] != "FAIL") return(FALSE)
+    df <- result$details[[i]][[keys[i]]]
+    !is.null(df) && nrow(df) > 0
+  }
+
   output$rese_detail <- renderUI({
     req(input$rese_checks_rows_selected)
     i <- input$rese_checks_rows_selected
+    r <- rese_check_results()
     path <- issue_path(input$country_select, "RESE", "check", rese_check_ids[i])
-    detail_header_ui(rese_check_results(), i, rese_detail_keys, "rese_detail_dt",
-                     issue_path_str = path, download_id = "rese_detail_download")
+    has_rows <- detail_has_rows(r, i, rese_detail_keys)
+    detail_header_ui(r, i, rese_detail_keys, "rese_detail_dt",
+                     issue_path_str = path, download_id = "rese_detail_download",
+                     cols_input_id = "rese_detail_cols",
+                     col_choices   = if (has_rows) names(rese_aug_df()),
+                     col_selected  = if (has_rows) rese_default_cols(),
+                     table_key     = "rese_check")
   })
-  output$rese_detail_dt <- DT::renderDT({ detail_dt(rese_detail_df()) })
   output$rese_detail_download <- downloadHandler(
     filename = function() paste0(input$country_select, "_RESE_check_",
                                  rese_check_ids[input$rese_checks_rows_selected], ".csv"),
-    content = function(file) write_pcc_csv(rese_detail_df(), file)
+    content = rese_table$export
   )
 
   output$parl_detail <- renderUI({
     req(input$parl_checks_rows_selected)
     i <- input$parl_checks_rows_selected
+    r <- parl_check_results()
     path <- issue_path(input$country_select, "PARL", "check", parl_check_ids[i])
-    detail_header_ui(parl_check_results(), i, parl_detail_keys, "parl_detail_dt",
-                     issue_path_str = path, download_id = "parl_detail_download")
+    has_rows <- detail_has_rows(r, i, parl_detail_keys)
+    detail_header_ui(r, i, parl_detail_keys, "parl_detail_dt",
+                     issue_path_str = path, download_id = "parl_detail_download",
+                     cols_input_id = "parl_detail_cols",
+                     col_choices   = if (has_rows) names(parl_aug_df()),
+                     col_selected  = if (has_rows) parl_default_cols(),
+                     table_key     = "parl_check")
   })
-  output$parl_detail_dt <- DT::renderDT({ detail_dt(parl_detail_df()) })
   output$parl_detail_download <- downloadHandler(
     filename = function() paste0(input$country_select, "_PARL_check_",
                                  parl_check_ids[input$parl_checks_rows_selected], ".csv"),
-    content = function(file) write_pcc_csv(parl_detail_df(), file)
+    content = parl_table$export
   )
 
   output$meme_detail <- renderUI({
     req(input$meme_checks_rows_selected)
     i <- input$meme_checks_rows_selected
+    r <- meme_check_results()
     path <- issue_path(input$country_select, "MEME", "check", meme_check_ids[i])
-    detail_header_ui(meme_check_results(), i, meme_detail_keys, "meme_detail_dt",
-                     issue_path_str = path, download_id = "meme_detail_download")
+    has_rows <- detail_has_rows(r, i, meme_detail_keys)
+    detail_header_ui(r, i, meme_detail_keys, "meme_detail_dt",
+                     issue_path_str = path, download_id = "meme_detail_download",
+                     cols_input_id = "meme_detail_cols",
+                     col_choices   = if (has_rows) names(meme_aug_df()),
+                     col_selected  = if (has_rows) meme_default_cols(),
+                     table_key     = "meme_check")
   })
-  output$meme_detail_dt <- DT::renderDT({ detail_dt(meme_detail_df()) })
   output$meme_detail_download <- downloadHandler(
     filename = function() paste0(input$country_select, "_MEME_check_",
                                  meme_check_ids[input$meme_checks_rows_selected], ".csv"),
-    content = function(file) write_pcc_csv(meme_detail_df(), file)
+    content = meme_table$export
   )
 
   output$poli_check_detail <- renderUI({
     req(input$poli_checks_rows_selected)
     i <- input$poli_checks_rows_selected
+    r <- poli_check_results()
     path <- issue_path(input$country_select, "POLI", "check", poli_check_ids[i])
-    detail_header_ui(poli_check_results(), i, poli_check_detail_keys, "poli_check_detail_dt",
-                     issue_path_str = path, download_id = "poli_check_detail_download")
+    has_rows <- detail_has_rows(r, i, poli_check_detail_keys)
+    detail_header_ui(r, i, poli_check_detail_keys, "poli_check_detail_dt",
+                     issue_path_str = path, download_id = "poli_check_detail_download",
+                     cols_input_id = "poli_check_detail_cols",
+                     col_choices   = if (has_rows) names(poli_check_aug_df()),
+                     col_selected  = if (has_rows) poli_check_default_cols(),
+                     table_key     = "poli_check")
   })
-  output$poli_check_detail_dt <- DT::renderDT({ detail_dt(poli_check_detail_df()) })
   output$poli_check_detail_download <- downloadHandler(
     filename = function() paste0(input$country_select, "_POLI_check_",
                                  poli_check_ids[input$poli_checks_rows_selected], ".csv"),
-    content = function(file) write_pcc_csv(poli_check_detail_df(), file)
+    content = poli_check_table$export
   )
 
   # --- Daily MP counts graph (RESE_MP tab) ---
@@ -1107,6 +1328,8 @@ server <- function(input, output, session) {
 
   # RESE entries ending on the clicked episode's end date; shared by the detail
   # header, the DT, and the CSV download so all three stay in lockstep.
+  # Full RESE rows: the default view narrows to overcount_default_cols, and the
+  # column selector can bring any of the remaining columns back.
   overcount_rese_ending <- reactive({
     info <- clicked_episode()
     req(!is.null(info))
@@ -1116,10 +1339,20 @@ server <- function(input, output, session) {
            RESE$political_function %in%
              c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
            !is.na(RESE$end_date) &
-           RESE$end_date == ep$end_date,
-         c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
-           "political_function", "parliament_id")]
+           RESE$end_date == ep$end_date, ]
   })
+
+  overcount_aug_df <- reactive({
+    info <- clicked_episode()
+    req(!is.null(info))
+    join_poli_ids(overcount_rese_ending(), POLI, info$country)
+  })
+  overcount_defaults <- reactive({
+    intersect(overcount_default_cols, names(overcount_aug_df()))
+  })
+  overcount_table <- wire_curated_dt(
+    overcount_aug_df, overcount_defaults, "overcount_rese_dt",
+    "overcount_rese_cols", reset_events = reactive(clicked_episode()))
 
   output$overcount_detail <- renderUI({
     info <- clicked_episode()
@@ -1150,7 +1383,11 @@ server <- function(input, output, session) {
     }
 
     path <- issue_path(cc, "RESE", "overcount", ep_parl_id)
-    auto_summary <- build_overcount_summary(ep, rese_ending,
+    # Keep the GitHub-issue summary at the curated 6 columns; the on-screen
+    # table now carries the full (augmented) RESE rows behind the selector.
+    rese_ending_summary <- rese_ending[
+      , intersect(overcount_default_cols, names(rese_ending)), drop = FALSE]
+    auto_summary <- build_overcount_summary(ep, rese_ending_summary,
                                              all_episodes = parl_episodes)
 
     tagList(
@@ -1172,22 +1409,20 @@ server <- function(input, output, session) {
           tags$p(style = "font-weight:bold; margin-top:8px;",
                  paste0("RESE entries ending on ", format_pcc_date(ep$end_date),
                         " (", nrow(rese_ending), "):")),
-          downloadButton("overcount_rese_download", "Export CSV",
+          selectizeInput("overcount_rese_cols", "Columns shown",
+                         choices = names(overcount_aug_df()),
+                         selected = overcount_defaults(),
+                         multiple = TRUE, width = "100%",
+                         options = list(plugins = list("remove_button"))),
+          DT::DTOutput("overcount_rese_dt"),
+          downloadButton("overcount_rese_download", "Export physical table",
                          class = "btn-sm btn-outline-secondary",
-                         style = "margin-bottom:6px;"),
-          DT::DTOutput("overcount_rese_dt")
+                         style = "margin-top:6px;")
         )
       },
-      issue_path_tag(path, auto_summary)
+      issue_path_tag(path, auto_summary,
+                     table_key = if (nrow(rese_ending) > 0) "overcount")
     )
-  })
-
-  output$overcount_rese_dt <- DT::renderDT({
-    rese_ending <- overcount_rese_ending()
-    req(nrow(rese_ending) > 0)
-    DT::datatable(rese_ending, rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "tip",
-                                order = list(list(0, "asc"))))
   })
 
   output$overcount_rese_download <- downloadHandler(
@@ -1196,17 +1431,13 @@ server <- function(input, output, session) {
       paste0(info$country, "_RESE_overcount_", format(info$ep$end_date, "%Y-%m-%d"),
              ".csv")
     },
-    content = function(file) {
-      write_pcc_csv(overcount_rese_ending(), file)
-    }
+    content = overcount_table$export
   )
 
   # --- POLI tab ---
 
   poli_vars <- reactive({
-    cc <- tolower(input$country_select)
-    id_cols <- grep(paste0("^id_", cc, "_"), names(POLI), value = TRUE, ignore.case = TRUE)
-    c(poli_base_vars, sort(id_cols))
+    c(poli_base_vars, country_id_cols(names(POLI), input$country_select))
   })
 
   filtered <- reactive({
@@ -1438,18 +1669,37 @@ server <- function(input, output, session) {
 
   # MPs missing the selected POLI variable, computed once and shared by the
   # header, the DT, the CSV download, and the issue-path summary below.
+  # Full POLI rows: the default view narrows via poli_missing_default_cols()
+  # (which INCLUDES the selected, empty variable so the table self-documents);
+  # the column selector offers every POLI column.
   poli_missing_rows <- reactive({
     req(input$poli_completeness_rows_selected)
     selected_var <- poli_vars()[input$poli_completeness_rows_selected]
     d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
     d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
   })
-  # The same rows reduced to the columns shown/exported (pers_id + other vars).
-  poli_missing_display <- reactive({
-    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
-    show_cols <- c("pers_id", setdiff(poli_vars(), selected_var))
-    poli_missing_rows()[, show_cols, drop = FALSE]
+
+  poli_missing_defaults <- reactive({
+    selected_var <- poli_vars()[req(input$poli_completeness_rows_selected)]
+    poli_missing_default_cols(selected_var, names(poli_missing_rows()),
+                              country_id_cols(names(POLI), input$country_select))
   })
+  poli_missing_table <- wire_curated_dt(
+    poli_missing_rows, poli_missing_defaults, "poli_missing_dt",
+    "poli_missing_cols",
+    reset_events = reactive(list(input$poli_completeness_rows_selected,
+                                 input$country_select)))
+
+  # Snapshot reactives (displayed columns x ALL rows) per issue-form table_key;
+  # read by the post_github_issue observer to build the CSV attachment.
+  issue_table_sources <- list(
+    rese_check   = rese_table$snapshot,
+    parl_check   = parl_table$snapshot,
+    meme_check   = meme_table$snapshot,
+    poli_check   = poli_check_table$snapshot,
+    overcount    = overcount_table$snapshot,
+    poli_missing = poli_missing_table$snapshot
+  )
 
   output$poli_missing_header <- renderUI({
     selected_var <- poli_vars()[input$poli_completeness_rows_selected]
@@ -1461,18 +1711,16 @@ server <- function(input, output, session) {
     tagList(
       tags$p(style = "font-weight:bold; color:#c0392b; margin-top:8px;",
              paste0("MPs missing ", selected_var, " (", nrow(missing), "):")),
-      downloadButton("poli_missing_download", "Export CSV",
+      selectizeInput("poli_missing_cols", "Columns shown",
+                     choices = names(missing),
+                     selected = poli_missing_defaults(),
+                     multiple = TRUE, width = "100%",
+                     options = list(plugins = list("remove_button"))),
+      DT::DTOutput("poli_missing_dt"),
+      downloadButton("poli_missing_download", "Export physical table",
                      class = "btn-sm btn-outline-secondary",
-                     style = "margin-bottom:6px;"),
-      DT::DTOutput("poli_missing_dt")
+                     style = "margin-top:6px;")
     )
-  })
-
-  output$poli_missing_dt <- DT::renderDT({
-    req(nrow(poli_missing_rows()) > 0)
-    DT::datatable(poli_missing_display(), rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
   })
 
   output$poli_missing_download <- downloadHandler(
@@ -1480,7 +1728,7 @@ server <- function(input, output, session) {
       selected_var <- poli_vars()[input$poli_completeness_rows_selected]
       paste0(input$country_select, "_POLI_missing_", selected_var, ".csv")
     },
-    content = function(file) write_pcc_csv(poli_missing_display(), file)
+    content = poli_missing_table$export
   )
 
   output$poli_completeness_issue_path <- renderUI({
@@ -1509,7 +1757,8 @@ server <- function(input, output, session) {
     auto_summary <- build_completeness_summary(selected_var, missing_preview,
                                                completeness_ts)
     path <- issue_path(input$country_select, "POLI", "completeness", selected_var)
-    issue_path_tag(path, auto_summary, has_plot = TRUE)
+    issue_path_tag(path, auto_summary, has_plot = TRUE,
+                   table_key = if (nrow(missing) > 0) "poli_missing")
   })
 
 }

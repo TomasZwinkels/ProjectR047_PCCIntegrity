@@ -83,6 +83,171 @@ test_that("write_pcc_csv preserves UTF-8 characters", {
   expect_equal(back$name, "Müller")
 })
 
+# --- country_id_cols ---
+
+test_that("country_id_cols finds the country's id_* columns, sorted", {
+  cols <- c("pers_id", "id_nl_pdc_slug", "id_nl_pdc_num", "id_us_bioguide",
+            "id_us_icpsr", "id_de_manow", "wikidata_id")
+  expect_equal(country_id_cols(cols, "NL"), c("id_nl_pdc_num", "id_nl_pdc_slug"))
+  expect_equal(country_id_cols(cols, "US"), c("id_us_bioguide", "id_us_icpsr"))
+})
+
+test_that("country_id_cols is case-insensitive on the country code", {
+  cols <- c("id_nl_pdc_num", "id_us_bioguide")
+  expect_equal(country_id_cols(cols, "nl"), "id_nl_pdc_num")
+})
+
+test_that("country_id_cols returns empty for a country without id columns", {
+  cols <- c("pers_id", "id_nl_pdc_num")
+  expect_equal(country_id_cols(cols, "NO"), character(0))
+})
+
+test_that("country_id_cols does not cross-match other countries", {
+  cols <- c("id_us_bioguide", "id_us_icpsr")
+  expect_equal(country_id_cols(cols, "NL"), character(0))
+})
+
+# --- default_detail_cols ---
+
+test_that("default_detail_cols returns the curated set intersected with df names", {
+  df_names <- c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
+                "political_function", "extra_col")
+  cols <- default_detail_cols("RESE", "resentryid_unique", df_names)
+  expect_equal(cols, c("res_entry_id", "pers_id", "res_entry_start",
+                       "res_entry_end", "political_function"))
+})
+
+test_that("default_detail_cols drops curated columns absent from the df", {
+  df_names <- c("res_entry_id", "pers_id")
+  cols <- default_detail_cols("RESE", "resentryid_unique", df_names)
+  expect_equal(cols, c("res_entry_id", "pers_id"))
+})
+
+test_that("default_detail_cols appends country ids for the POLI frame only", {
+  df_names <- c("pers_id", "last_name", "first_name", "birth_date",
+                "wikidata_id", "id_nl_pdc_num")
+  poli_cols <- default_detail_cols("POLI", "persid_unique", df_names,
+                                   country_ids = "id_nl_pdc_num")
+  expect_true("id_nl_pdc_num" %in% poli_cols)
+
+  rese_names <- c("res_entry_id", "pers_id", "res_entry_start",
+                  "res_entry_end", "political_function", "id_nl_pdc_num")
+  rese_cols <- default_detail_cols("RESE", "resentryid_unique", rese_names,
+                                   country_ids = "id_nl_pdc_num")
+  expect_false("id_nl_pdc_num" %in% rese_cols)
+})
+
+test_that("default_detail_cols falls back to pers_id + primary key for unmapped checks", {
+  df_names <- c("memep_id", "pers_id", "some_col")
+  cols <- default_detail_cols("MEME", "not_a_real_check", df_names)
+  expect_equal(sort(cols), sort(c("pers_id", "memep_id")))
+})
+
+test_that("default_detail_cols falls back to first 6 columns for keyless dfs", {
+  df_names <- paste0("v", 1:10)
+  cols <- default_detail_cols("RESE", "not_a_real_check", df_names)
+  expect_equal(cols, paste0("v", 1:6))
+})
+
+test_that("detail_default_cols_map covers every check id exactly", {
+  expect_setequal(names(detail_default_cols_map$RESE), rese_check_ids)
+  expect_setequal(names(detail_default_cols_map$PARL), parl_check_ids)
+  expect_setequal(names(detail_default_cols_map$MEME), meme_check_ids)
+  expect_setequal(names(detail_default_cols_map$POLI), poli_check_ids)
+})
+
+test_that("every default-column map entry is a non-empty character vector", {
+  for (frame in names(detail_default_cols_map)) {
+    for (check in names(detail_default_cols_map[[frame]])) {
+      entry <- detail_default_cols_map[[frame]][[check]]
+      expect_true(is.character(entry) && length(entry) > 0,
+                  info = paste(frame, check))
+    }
+  }
+})
+
+# --- poli_missing_default_cols ---
+
+test_that("poli_missing_default_cols includes the selected (missing) variable", {
+  df_names <- c("pers_id", "last_name", "first_name", "birth_date",
+                "id_nl_pdc_num", "other")
+  cols <- poli_missing_default_cols("birth_date", df_names, "id_nl_pdc_num")
+  expect_true("birth_date" %in% cols)   # regression: was excluded via setdiff
+  expect_equal(cols, c("pers_id", "last_name", "first_name",
+                       "birth_date", "id_nl_pdc_num"))
+})
+
+test_that("poli_missing_default_cols intersects with available names", {
+  cols <- poli_missing_default_cols("birth_date", c("pers_id", "birth_date"),
+                                    "id_nl_pdc_num")
+  expect_equal(cols, c("pers_id", "birth_date"))
+})
+
+# --- join_poli_ids ---
+
+mk_poli <- function() {
+  data.frame(
+    pers_id       = c("NL_A_1990", "NL_B_1991", "NL_C_1992"),
+    id_nl_pdc_num = c("101", "102", "103"),
+    id_us_bioguide = c("", "", ""),
+    last_name     = c("A", "B", "C"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("join_poli_ids adds the country id columns, preserving rows and order", {
+  df <- data.frame(pers_id = c("NL_B_1991", "NL_A_1990"), x = 1:2,
+                   stringsAsFactors = FALSE)
+  out <- join_poli_ids(df, mk_poli(), "NL")
+  expect_equal(nrow(out), 2)
+  expect_equal(out$pers_id, c("NL_B_1991", "NL_A_1990"))   # order preserved
+  expect_equal(out$id_nl_pdc_num, c("102", "101"))
+  expect_false("id_us_bioguide" %in% names(out))           # other countries excluded
+  expect_false("last_name" %in% names(out))                # only pers_id + id cols joined
+})
+
+test_that("join_poli_ids does not explode rows when POLI has duplicate pers_id", {
+  poli <- rbind(mk_poli(), mk_poli()[1, ])                 # NL_A_1990 duplicated
+  df <- data.frame(pers_id = c("NL_A_1990", "NL_A_1990", "NL_C_1992"),
+                   x = 1:3, stringsAsFactors = FALSE)
+  out <- join_poli_ids(df, poli, "NL")
+  expect_equal(nrow(out), 3)                               # no row explosion
+})
+
+test_that("join_poli_ids is a no-op when df lacks pers_id", {
+  df <- data.frame(parliament_id = "NL_NT-TK_2021", stringsAsFactors = FALSE)
+  expect_identical(join_poli_ids(df, mk_poli(), "NL"), df)
+})
+
+test_that("join_poli_ids is a no-op when the id columns already exist", {
+  df <- data.frame(pers_id = "NL_A_1990", id_nl_pdc_num = "999",
+                   stringsAsFactors = FALSE)
+  out <- join_poli_ids(df, mk_poli(), "NL")
+  expect_identical(out, df)                                # not overwritten, not re-added
+})
+
+test_that("join_poli_ids yields NA for pers_ids not in POLI", {
+  df <- data.frame(pers_id = "NL_X_1900", stringsAsFactors = FALSE)
+  out <- join_poli_ids(df, mk_poli(), "NL")
+  expect_true(is.na(out$id_nl_pdc_num))
+})
+
+test_that("join_poli_ids handles NULL df", {
+  expect_null(join_poli_ids(NULL, mk_poli(), "NL"))
+})
+
+# --- clamp_export_rows ---
+
+test_that("clamp_export_rows drops out-of-bounds indices, preserving order", {
+  expect_equal(clamp_export_rows(c(5, 2, 99, 1), 10), c(5, 2, 1))
+  expect_equal(clamp_export_rows(c(3, 1, 2), 3), c(3, 1, 2))
+})
+
+test_that("clamp_export_rows handles empty input and zero-row tables", {
+  expect_equal(clamp_export_rows(integer(0), 5), integer(0))
+  expect_equal(clamp_export_rows(c(1, 2), 0), numeric(0))
+})
+
 # --- issue_path ---
 
 test_that("issue_path builds correct 4-level path", {
@@ -297,6 +462,45 @@ test_that("issue_image_filename handles different issue numbers", {
   expect_false(fn1 == fn2)
   expect_true(grepl("issue42", fn1))
   expect_true(grepl("issue78", fn2))
+})
+
+# --- issue_asset_filename ---
+
+test_that("issue_asset_filename builds <sanitized_path>_issue<N>.<ext>", {
+  expect_equal(issue_asset_filename("NL / POLI / completeness / death_date", 42, "csv"),
+               "NL_POLI_completeness_death_date_issue42.csv")
+})
+
+test_that("issue_asset_filename shares its stem with the image filename", {
+  # The discoverability contract: PNG and CSV for the same issue differ only
+  # in extension, so an agent can derive one name from the other.
+  path <- "NL / RESE / overcount / NL_NT-TK_2012"
+  png <- issue_image_filename(path, 7)
+  csv <- issue_asset_filename(path, 7, "csv")
+  expect_equal(sub("\\.png$", "", png), sub("\\.csv$", "", csv))
+})
+
+test_that("issue_asset_filename sanitizes special characters", {
+  fn <- issue_asset_filename("XX / A&B / check / weird name!", 3, "csv")
+  expect_false(grepl("[^a-zA-Z0-9_.]", fn))
+  expect_true(grepl("_issue3\\.csv$", fn))
+})
+
+# --- issue_data_link_markdown ---
+
+test_that("issue_data_link_markdown builds the Problem table body line", {
+  md <- issue_data_link_markdown(
+    "https://raw.githubusercontent.com/o/r/main/f.csv", "f.csv", 191)
+  expect_true(grepl("\\*\\*Problem table:\\*\\*", md))
+  expect_true(grepl("\\[f\\.csv\\]\\(https://raw\\.githubusercontent\\.com/o/r/main/f\\.csv\\)", md))
+  expect_true(grepl("191 rows", md))
+  expect_true(grepl('sep = ";"', md))
+})
+
+test_that("issue_data_link_markdown uses singular for one row", {
+  md <- issue_data_link_markdown("https://x/f.csv", "f.csv", 1)
+  expect_true(grepl("1 row,", md))
+  expect_false(grepl("1 rows", md))
 })
 
 # --- save_issue_plot ---
