@@ -1,10 +1,87 @@
-# R047_issue_unittests.R
-# Unit tests for R047_issue_functions.R
+# R047_dashboard_unittests.R
+# Fast unit tests for Dashboard/R047_dashboard_functions.R — pure logic only,
+# safe to run at app startup. Tests that call external services (Codex LLM,
+# GitHub API) live in R047_dashboard_slow_unittests.R.
 
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_functions.R")
-source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_issue_functions.R")
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_functions.R")
 
 library(testthat)
+
+# --- write_pcc_csv ---
+
+test_that("write_pcc_csv round-trips values via read.csv(sep = ';')", {
+  df <- data.frame(
+    pers_id = c("CA_Smith_John_1950", "CA_Doe_Jane_1962"),
+    seats   = c(1L, 2L),
+    stringsAsFactors = FALSE
+  )
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  back <- read.csv(tmp, sep = ";", stringsAsFactors = FALSE)
+
+  expect_equal(names(back), names(df))
+  expect_equal(back$pers_id, df$pers_id)
+  expect_equal(back$seats, df$seats)
+})
+
+test_that("write_pcc_csv uses ';' as the field separator", {
+  df <- data.frame(a = "x", b = "y", stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  lines <- readLines(tmp)
+
+  expect_true(all(grepl(";", lines)))   # header + every data row
+  expect_false(any(grepl(",", lines)))  # no comma separators leak in
+})
+
+test_that("write_pcc_csv writes NA as an empty field, not the literal 'NA'", {
+  df <- data.frame(
+    a = c("x", NA),
+    b = c(NA_integer_, 2L),
+    stringsAsFactors = FALSE
+  )
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  lines <- readLines(tmp)
+
+  # No cell should contain the string "NA"
+  expect_false(any(grepl("NA", lines)))
+
+  back <- read.csv(tmp, sep = ";", stringsAsFactors = FALSE)
+  expect_true(is.na(back$b[1]))   # blank numeric field reads back as NA
+  expect_equal(back$b[2], 2L)
+})
+
+test_that("write_pcc_csv omits row names", {
+  df <- data.frame(a = c("p", "q"), stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  header <- readLines(tmp)[1]
+
+  # Header is exactly the single quoted column name, no leading rowname column
+  expect_equal(header, "\"a\"")
+})
+
+test_that("write_pcc_csv preserves UTF-8 characters", {
+  df <- data.frame(name = "Müller", stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  back <- read.csv(tmp, sep = ";", fileEncoding = "UTF-8",
+                   stringsAsFactors = FALSE)
+
+  expect_equal(back$name, "Müller")
+})
 
 # --- issue_path ---
 
@@ -178,36 +255,6 @@ test_that("gh_issue_create_cmd builds valid command string", {
   expect_true(grepl("2>&1$", cmd))
 })
 
-# --- gh_list_issues ---
-
-test_that("gh_list_issues returns empty data.frame for nonexistent labels", {
-  df <- gh_list_issues("TomasZwinkels/PCCdata",
-                       "XX / FAKE / check / nonexistent_label_xyz")
-  expect_true(is.data.frame(df))
-  expect_equal(nrow(df), 0)
-  expect_true(all(c("number", "title", "state", "url") %in% names(df)))
-})
-
-test_that("gh_list_issues returns correct columns for existing issues", {
-  # This relies on the birth_place_raw issue we created earlier
-  df <- gh_list_issues("TomasZwinkels/PCCdata",
-                       "NL / POLI / completeness / birth_place_raw")
-  expect_true(is.data.frame(df))
-  expect_true(all(c("number", "title", "state", "url") %in% names(df)))
-  if (nrow(df) > 0) {
-    expect_true(is.integer(df$number) || is.numeric(df$number))
-    expect_true(all(df$state %in% c("OPEN", "CLOSED")))
-    expect_true(all(grepl("github.com", df$url)))
-  }
-})
-
-test_that("gh_list_issues handles gracefully when repo doesn't exist", {
-  df <- gh_list_issues("nonexistent/repo_xyz_999",
-                       "NL / POLI / completeness / birth_date")
-  expect_true(is.data.frame(df))
-  expect_equal(nrow(df), 0)
-})
-
 # --- LLM prompt builders ---
 
 test_that("build_title_prompt includes issue path and summary", {
@@ -229,51 +276,6 @@ test_that("build_description_prompt includes issue path and summary", {
   expect_true(grepl("NL / RESE / check / full_overlap", prompt))
   expect_true(grepl("3", prompt))
   expect_true(grepl("markdown", prompt, ignore.case = TRUE))
-})
-
-test_that("llm_generate_title falls back to path on failure", {
-  # codex_query will fail if codex is not installed or key not set
-  # but the function should gracefully return the path
-  path <- "XX / TEST / check / fake_check"
-  result <- llm_generate_title(path, "some summary")
-  expect_true(is.character(result))
-  expect_true(nchar(result) > 0)
-})
-
-test_that("llm_generate_description returns string on failure", {
-  result <- llm_generate_description("XX / TEST / check / fake", "summary")
-  expect_true(is.character(result))
-})
-
-# --- codex_query integration tests (run only if codex is available) ---
-
-codex_available <- nchar(Sys.which("codex")) > 0
-
-test_that("codex_query returns a response for a simple prompt", {
-  skip_if(!codex_available, "codex CLI not installed")
-  result <- codex_query("Reply with only the word hello")
-  expect_false(is.null(result))
-  expect_true(grepl("hello", tolower(result)))
-})
-
-test_that("llm_generate_title produces a readable title", {
-  skip_if(!codex_available, "codex CLI not installed")
-  path <- "NL / POLI / completeness / birth_date"
-  summary <- "**Variable:** `birth_date`\n**Missing for:** 42 MPs"
-  title <- llm_generate_title(path, summary)
-  expect_true(nchar(title) > 0)
-  expect_true(nchar(title) <= 120)
-  # Should not just be the raw path
-  expect_false(identical(title, path))
-})
-
-test_that("llm_generate_description produces a description", {
-  skip_if(!codex_available, "codex CLI not installed")
-  path <- "NL / POLI / completeness / birth_date"
-  summary <- "**Variable:** `birth_date`\n**Missing for:** 42 MPs"
-  desc <- llm_generate_description(path, summary)
-  expect_true(nchar(desc) > 0)
-  expect_true(nchar(desc) > 20)
 })
 
 # --- issue_image_filename ---

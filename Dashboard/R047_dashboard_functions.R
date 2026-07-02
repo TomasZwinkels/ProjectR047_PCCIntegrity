@@ -1,6 +1,19 @@
-# R047_issue_functions.R
-# Functions for GitHub issue integration in the R047 dashboard.
+# R047_dashboard_functions.R
+# Functions used exclusively by the R047 dashboard (Dashboard/app.R):
+# GitHub issue integration, LLM (Codex) helpers, and CSV export.
 # Pure logic — no Shiny dependencies. Testable independently.
+# Requires format_pcc_date() from R047_functions.R (sourced by app.R).
+
+# --- CSV export ---
+
+# Writes a data.frame to a semicolon-delimited CSV matching the PCCdata
+# format (source files are read with sep = ";"). NA is written as an empty
+# string so exports round-trip cleanly via read.csv(..., sep = ";"), and the
+# file is UTF-8 encoded. `file` may be a path or a connection.
+write_pcc_csv <- function(df, file) {
+  write.table(df, file, sep = ";", row.names = FALSE, na = "",
+              qmethod = "double", fileEncoding = "UTF-8")
+}
 
 # --- Issue identifier vectors (one per check, matching check order) ---
 rese_check_ids <- c(

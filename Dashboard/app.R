@@ -8,13 +8,14 @@ source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_functions.R")
-source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_issue_functions.R")
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_functions.R")
 
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_unittests.R")
-# test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_issue_unittests.R") # It contains generative AI calls, so is slow, so commented out by default. 
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_unittests.R")
+# test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_slow_unittests.R") # Calls external services (Codex LLM, GitHub API), so is slow, so commented out by default.
 
 # Load data once at startup
 POLI <- read.csv("/home/tomas/projects/PCCdata/POLI.csv", header = TRUE, sep = ";") |>
@@ -494,7 +495,7 @@ checks_dt <- function(df) {
 
 # Build the header tagList for a detail panel; the DT itself is injected by renderDT.
 detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
-                             issue_path_str = NULL) {
+                             issue_path_str = NULL, download_id = NULL) {
   status <- result$table$Status[row_idx]
   label  <- result$table$Check[row_idx]
 
@@ -524,7 +525,13 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
     if (n == 0)
       tags$p(style = "color:#666;", "(No problem rows returned by details function.)")
     else
-      DT::DTOutput(dt_output_id),
+      tagList(
+        if (!is.null(download_id))
+          downloadButton(download_id, "Export CSV",
+                         class = "btn-sm btn-outline-secondary",
+                         style = "margin-bottom:6px;"),
+        DT::DTOutput(dt_output_id)
+      ),
     path_tag
   )
 }
@@ -849,81 +856,90 @@ server <- function(input, output, session) {
   output$meme_checks <- DT::renderDataTable({ checks_dt(meme_check_results()$table) })
   output$poli_checks <- DT::renderDataTable({ checks_dt(poli_check_results()$table) })
 
+  # Shared plumbing for the four check-detail tables. One reactive per tab
+  # returns the selected FAIL row's problem data frame and feeds BOTH the DT
+  # and the CSV download, so an export can never drift from the displayed table.
+  make_detail_df <- function(results_reactive, keys, row_input) {
+    reactive({
+      i <- row_input()
+      req(!is.null(i))
+      r <- results_reactive()
+      req(r$table$Status[i] == "FAIL")
+      df <- r$details[[i]][[keys[i]]]
+      req(!is.null(df) && nrow(df) > 0)
+      df
+    })
+  }
+  detail_dt <- function(df) {
+    DT::datatable(df, rownames = FALSE, filter = "top",
+                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
+                                order = list(list(0, "asc"))))
+  }
+
+  rese_detail_df <- make_detail_df(rese_check_results, rese_detail_keys,
+                                   function() input$rese_checks_rows_selected)
+  parl_detail_df <- make_detail_df(parl_check_results, parl_detail_keys,
+                                   function() input$parl_checks_rows_selected)
+  meme_detail_df <- make_detail_df(meme_check_results, meme_detail_keys,
+                                   function() input$meme_checks_rows_selected)
+  poli_check_detail_df <- make_detail_df(poli_check_results, poli_check_detail_keys,
+                                   function() input$poli_checks_rows_selected)
+
   output$rese_detail <- renderUI({
     req(input$rese_checks_rows_selected)
     i <- input$rese_checks_rows_selected
     path <- issue_path(input$country_select, "RESE", "check", rese_check_ids[i])
     detail_header_ui(rese_check_results(), i, rese_detail_keys, "rese_detail_dt",
-                     issue_path_str = path)
+                     issue_path_str = path, download_id = "rese_detail_download")
   })
-  output$rese_detail_dt <- DT::renderDT({
-    req(input$rese_checks_rows_selected)
-    r <- rese_check_results()
-    i <- input$rese_checks_rows_selected
-    req(r$table$Status[i] == "FAIL")
-    df <- r$details[[i]][[rese_detail_keys[i]]]
-    req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
-  })
+  output$rese_detail_dt <- DT::renderDT({ detail_dt(rese_detail_df()) })
+  output$rese_detail_download <- downloadHandler(
+    filename = function() paste0(input$country_select, "_RESE_check_",
+                                 rese_check_ids[input$rese_checks_rows_selected], ".csv"),
+    content = function(file) write_pcc_csv(rese_detail_df(), file)
+  )
 
   output$parl_detail <- renderUI({
     req(input$parl_checks_rows_selected)
     i <- input$parl_checks_rows_selected
     path <- issue_path(input$country_select, "PARL", "check", parl_check_ids[i])
     detail_header_ui(parl_check_results(), i, parl_detail_keys, "parl_detail_dt",
-                     issue_path_str = path)
+                     issue_path_str = path, download_id = "parl_detail_download")
   })
-  output$parl_detail_dt <- DT::renderDT({
-    req(input$parl_checks_rows_selected)
-    r <- parl_check_results()
-    i <- input$parl_checks_rows_selected
-    req(r$table$Status[i] == "FAIL")
-    df <- r$details[[i]][[parl_detail_keys[i]]]
-    req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
-  })
+  output$parl_detail_dt <- DT::renderDT({ detail_dt(parl_detail_df()) })
+  output$parl_detail_download <- downloadHandler(
+    filename = function() paste0(input$country_select, "_PARL_check_",
+                                 parl_check_ids[input$parl_checks_rows_selected], ".csv"),
+    content = function(file) write_pcc_csv(parl_detail_df(), file)
+  )
 
   output$meme_detail <- renderUI({
     req(input$meme_checks_rows_selected)
     i <- input$meme_checks_rows_selected
     path <- issue_path(input$country_select, "MEME", "check", meme_check_ids[i])
     detail_header_ui(meme_check_results(), i, meme_detail_keys, "meme_detail_dt",
-                     issue_path_str = path)
+                     issue_path_str = path, download_id = "meme_detail_download")
   })
-  output$meme_detail_dt <- DT::renderDT({
-    req(input$meme_checks_rows_selected)
-    r <- meme_check_results()
-    i <- input$meme_checks_rows_selected
-    req(r$table$Status[i] == "FAIL")
-    df <- r$details[[i]][[meme_detail_keys[i]]]
-    req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
-  })
+  output$meme_detail_dt <- DT::renderDT({ detail_dt(meme_detail_df()) })
+  output$meme_detail_download <- downloadHandler(
+    filename = function() paste0(input$country_select, "_MEME_check_",
+                                 meme_check_ids[input$meme_checks_rows_selected], ".csv"),
+    content = function(file) write_pcc_csv(meme_detail_df(), file)
+  )
 
   output$poli_check_detail <- renderUI({
     req(input$poli_checks_rows_selected)
     i <- input$poli_checks_rows_selected
     path <- issue_path(input$country_select, "POLI", "check", poli_check_ids[i])
     detail_header_ui(poli_check_results(), i, poli_check_detail_keys, "poli_check_detail_dt",
-                     issue_path_str = path)
+                     issue_path_str = path, download_id = "poli_check_detail_download")
   })
-  output$poli_check_detail_dt <- DT::renderDT({
-    req(input$poli_checks_rows_selected)
-    r <- poli_check_results()
-    i <- input$poli_checks_rows_selected
-    req(r$table$Status[i] == "FAIL")
-    df <- r$details[[i]][[poli_check_detail_keys[i]]]
-    req(!is.null(df) && nrow(df) > 0)
-    DT::datatable(df, rownames = FALSE, filter = "top",
-                  options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
-                                order = list(list(0, "asc"))))
-  })
+  output$poli_check_detail_dt <- DT::renderDT({ detail_dt(poli_check_detail_df()) })
+  output$poli_check_detail_download <- downloadHandler(
+    filename = function() paste0(input$country_select, "_POLI_check_",
+                                 poli_check_ids[input$poli_checks_rows_selected], ".csv"),
+    content = function(file) write_pcc_csv(poli_check_detail_df(), file)
+  )
 
   # --- Daily MP counts graph (RESE_MP tab) ---
 
@@ -1089,19 +1105,29 @@ server <- function(input, output, session) {
   # Clear clicked episode when country changes
   observeEvent(input$country_select, { clicked_episode(NULL) })
 
+  # RESE entries ending on the clicked episode's end date; shared by the detail
+  # header, the DT, and the CSV download so all three stay in lockstep.
+  overcount_rese_ending <- reactive({
+    info <- clicked_episode()
+    req(!is.null(info))
+    ep <- info$ep
+    cc <- info$country
+    RESE[RESE$country_abb == cc &
+           RESE$political_function %in%
+             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
+           !is.na(RESE$end_date) &
+           RESE$end_date == ep$end_date,
+         c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
+           "political_function", "parliament_id")]
+  })
+
   output$overcount_detail <- renderUI({
     info <- clicked_episode()
     req(!is.null(info))
 
     ep <- info$ep
     cc <- info$country
-    rese_ending <- RESE[RESE$country_abb == cc &
-                          RESE$political_function %in%
-                            c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
-                          !is.na(RESE$end_date) &
-                          RESE$end_date == ep$end_date,
-                        c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
-                          "political_function", "parliament_id")]
+    rese_ending <- overcount_rese_ending()
 
     # Determine parliament_id for the overcount episode (use midpoint)
     ep_mid <- ep$start_date + as.integer((ep$end_date - ep$start_date) / 2)
@@ -1146,6 +1172,9 @@ server <- function(input, output, session) {
           tags$p(style = "font-weight:bold; margin-top:8px;",
                  paste0("RESE entries ending on ", format_pcc_date(ep$end_date),
                         " (", nrow(rese_ending), "):")),
+          downloadButton("overcount_rese_download", "Export CSV",
+                         class = "btn-sm btn-outline-secondary",
+                         style = "margin-bottom:6px;"),
           DT::DTOutput("overcount_rese_dt")
         )
       },
@@ -1154,23 +1183,23 @@ server <- function(input, output, session) {
   })
 
   output$overcount_rese_dt <- DT::renderDT({
-    info <- clicked_episode()
-    req(!is.null(info))
-
-    ep <- info$ep
-    cc <- info$country
-    rese_ending <- RESE[RESE$country_abb == cc &
-                          RESE$political_function %in%
-                            c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
-                          !is.na(RESE$end_date) &
-                          RESE$end_date == ep$end_date,
-                        c("res_entry_id", "pers_id", "res_entry_start", "res_entry_end",
-                          "political_function", "parliament_id")]
+    rese_ending <- overcount_rese_ending()
     req(nrow(rese_ending) > 0)
     DT::datatable(rese_ending, rownames = FALSE,
                   options = list(scrollX = TRUE, pageLength = 10, dom = "tip",
                                 order = list(list(0, "asc"))))
   })
+
+  output$overcount_rese_download <- downloadHandler(
+    filename = function() {
+      info <- clicked_episode()
+      paste0(info$country, "_RESE_overcount_", format(info$ep$end_date, "%Y-%m-%d"),
+             ".csv")
+    },
+    content = function(file) {
+      write_pcc_csv(overcount_rese_ending(), file)
+    }
+  )
 
   # --- POLI tab ---
 
@@ -1407,11 +1436,24 @@ server <- function(input, output, session) {
     )
   })
 
-  output$poli_missing_header <- renderUI({
+  # MPs missing the selected POLI variable, computed once and shared by the
+  # header, the DT, the CSV download, and the issue-path summary below.
+  poli_missing_rows <- reactive({
     req(input$poli_completeness_rows_selected)
     selected_var <- poli_vars()[input$poli_completeness_rows_selected]
     d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
-    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+    d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+  })
+  # The same rows reduced to the columns shown/exported (pers_id + other vars).
+  poli_missing_display <- reactive({
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
+    show_cols <- c("pers_id", setdiff(poli_vars(), selected_var))
+    poli_missing_rows()[, show_cols, drop = FALSE]
+  })
+
+  output$poli_missing_header <- renderUI({
+    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
+    missing <- poli_missing_rows()
     if (nrow(missing) == 0) {
       return(tags$p(style = "color:#28a745; font-weight:bold; margin-top:8px;",
                     paste0("All MPs have ", selected_var, " available.")))
@@ -1419,27 +1461,32 @@ server <- function(input, output, session) {
     tagList(
       tags$p(style = "font-weight:bold; color:#c0392b; margin-top:8px;",
              paste0("MPs missing ", selected_var, " (", nrow(missing), "):")),
+      downloadButton("poli_missing_download", "Export CSV",
+                     class = "btn-sm btn-outline-secondary",
+                     style = "margin-bottom:6px;"),
       DT::DTOutput("poli_missing_dt")
     )
   })
 
   output$poli_missing_dt <- DT::renderDT({
-    req(input$poli_completeness_rows_selected)
-    selected_var <- poli_vars()[input$poli_completeness_rows_selected]
-    d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
-    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
-    req(nrow(missing) > 0)
-    show_cols <- c("pers_id", setdiff(poli_vars(), selected_var))
-    DT::datatable(missing[, show_cols, drop = FALSE], rownames = FALSE, filter = "top",
+    req(nrow(poli_missing_rows()) > 0)
+    DT::datatable(poli_missing_display(), rownames = FALSE, filter = "top",
                   options = list(scrollX = TRUE, pageLength = 10, dom = "ltip",
                                 order = list(list(0, "asc"))))
   })
 
+  output$poli_missing_download <- downloadHandler(
+    filename = function() {
+      selected_var <- poli_vars()[input$poli_completeness_rows_selected]
+      paste0(input$country_select, "_POLI_missing_", selected_var, ".csv")
+    },
+    content = function(file) write_pcc_csv(poli_missing_display(), file)
+  )
+
   output$poli_completeness_issue_path <- renderUI({
     req(input$poli_completeness_rows_selected)
     selected_var <- poli_vars()[input$poli_completeness_rows_selected]
-    d_mp <- filtered() |> filter(pers_id %in% ever_mp_ids())
-    missing <- d_mp[is.na(d_mp[[selected_var]]) | d_mp[[selected_var]] == "", ]
+    missing <- poli_missing_rows()
     show_cols <- c("pers_id", intersect(c("last_name", "first_name"), names(missing)))
     missing_preview <- missing[, show_cols, drop = FALSE]
 
