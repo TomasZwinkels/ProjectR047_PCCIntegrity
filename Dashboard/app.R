@@ -230,6 +230,19 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
   settings_id <- paste0(form_id, "_settings")
   auto_id <- paste0(form_id, "_auto")
 
+  # table_key may be a single registry key (historical: one CSV, no filename
+  # suffix) or a NAMED vector where names are per-file suffixes and values are
+  # registry keys (e.g. c(peak = "overcount_peak")). Flatten to a "key:suffix;..."
+  # spec string the post handler splits; unnamed keys get an empty suffix.
+  has_table   <- !is.null(table_key) && length(table_key) > 0
+  n_tables    <- if (has_table) length(table_key) else 0
+  table_specs <- if (has_table) {
+    sfx <- names(table_key)
+    if (is.null(sfx)) sfx <- rep("", n_tables)
+    sfx[is.na(sfx)] <- ""
+    paste0(unname(table_key), ":", sfx, collapse = ";")
+  } else ""
+
   labels <- issue_path_to_labels(path)
   label_names <- c("country", "dataframe", "type", "identifier")
   issues_div_id <- paste0(form_id, "_issues")
@@ -324,7 +337,7 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
           "Attach the graph shown above"
         )
       ),
-      if (!is.null(table_key)) tags$div(
+      if (has_table) tags$div(
         style = "margin-top:6px;",
         tags$label(
           style = "font-size:0.9em; color:#555; cursor:pointer;",
@@ -334,7 +347,9 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
             checked = "checked",
             style = "margin-right:5px;"
           ),
-          "Attach problem table (CSV, shown columns, all rows)"
+          if (n_tables > 1)
+            sprintf("Attach %d problem tables (CSV, all rows)", n_tables)
+          else "Attach problem table (CSV, shown columns, all rows)"
         )
       ),
       tags$div(
@@ -374,13 +389,13 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "asset_repo: document.getElementById('%s_asset_repo').value, ",
               "has_plot: (function(){ var cb = document.getElementById('%s_attach_plot'); return cb ? cb.checked : false; })(), ",
               "plot_key: '%s', ",
-              "table_key: '%s', ",
+              "table_keys: '%s', ",
               "attach_table: (function(){ var cb = document.getElementById('%s_attach_table'); return cb ? cb.checked : false; })(), ",
               "nonce: Math.random()});"
             ),
             path_js, form_id, form_id, auto_id, settings_id, settings_id,
             form_id, if (is.null(plot_key)) "" else plot_key,
-            if (is.null(table_key)) "" else table_key, form_id
+            table_specs, form_id
           ),
           id = paste0(form_id, "_post_btn")
         ),
@@ -939,44 +954,47 @@ server <- function(input, output, session) {
         }
       }
 
-      # Attach the problem table (displayed columns x ALL rows) as a CSV in the
-      # asset repo and link it in the issue body. The filename is deterministic
-      # (<sanitized path>_issue<N>.csv) so coding agents can find the data from
-      # the issue alone.
-      if (isTRUE(info$attach_table) && nzchar(info$table_key) &&
+      # Attach one or more problem tables (displayed/curated columns x ALL rows)
+      # as CSVs in the asset repo and link each in the issue body. table_keys is a
+      # "key:suffix;..." spec: each key selects a snapshot in issue_table_sources,
+      # each suffix disambiguates the deterministic filename
+      # (<sanitized path>_issue<N>[_suffix].csv) so a coding agent can find every
+      # table from the issue alone.
+      if (isTRUE(info$attach_table) && nzchar(info$table_keys) &&
           !is.na(result$issue_number)) {
-        snapshot <- issue_table_sources[[info$table_key]]
-        df <- if (!is.null(snapshot)) {
-          tryCatch(snapshot(), error = function(e) NULL)  # req()/freeze guards
-        }
-        if (!is.null(df) && nrow(df) > 0) {
-          setProgress(0.7, detail = "Uploading problem table...")
+        specs <- strsplit(info$table_keys, ";", fixed = TRUE)[[1]]
+        attached <- 0L
+        for (spec in specs) {
+          parts  <- strsplit(spec, ":", fixed = TRUE)[[1]]
+          key    <- parts[1]
+          suffix <- if (length(parts) > 1) parts[2] else ""
+          snapshot <- issue_table_sources[[key]]
+          df <- if (!is.null(snapshot)) {
+            tryCatch(snapshot(), error = function(e) NULL)  # req()/freeze guards
+          }
+          if (is.null(df) || nrow(df) == 0) next
+          setProgress(0.7, detail = paste0("Uploading table ",
+                                           if (nzchar(suffix)) suffix else key, "..."))
           csv_path <- tempfile(fileext = ".csv")
           write_pcc_csv(df, csv_path)
           csv_filename <- issue_asset_filename(info$path, result$issue_number,
-                                               "csv")
+                                               "csv", suffix = suffix)
           csv_url <- gh_upload_asset(csv_path, asset_repo, csv_filename)
           unlink(csv_path)
-
           if (!is.null(csv_url)) {
-            setProgress(0.95, detail = "Linking problem table in issue...")
             gh_append_data_link_to_issue(repo, result$issue_number,
                                          csv_url, csv_filename, nrow(df))
-            showNotification(
-              paste0("Problem table attached (", nrow(df), " rows)."),
-              type = "message", duration = 4
-            )
-          } else {
-            showNotification(
-              "Issue created but problem-table upload failed.",
-              type = "warning", duration = 6
-            )
+            attached <- attached + 1L
           }
+        }
+        if (attached > 0) {
+          showNotification(
+            paste0(attached, " problem table(s) attached."),
+            type = "message", duration = 4)
         } else {
           showNotification(
-            "Issue created but the problem table could not be read.",
-            type = "warning", duration = 6
-          )
+            "Issue created but no problem table could be attached.",
+            type = "warning", duration = 6)
         }
       }
 
@@ -1374,12 +1392,16 @@ server <- function(input, output, session) {
 
     # Compute stats per episode
     episodes$duration_days <- as.integer(episodes$end_date - episodes$start_date) + 1L
+    episodes$peak_date <- as.Date(NA)   # preallocate: [i]<- into NULL drops Date class
     for (i in seq_len(nrow(episodes))) {
       rows <- dc[dc$date >= episodes$start_date[i] & dc$date <= episodes$end_date[i], ]
       excess <- rows$n_seated - rows$parliament_size
       episodes$peak_excess[i]    <- max(excess)
       episodes$mean_excess[i]    <- round(mean(excess), 1)
       episodes$parliament_size[i] <- rows$parliament_size[1]
+      # Day the overcount is worst: the roster on this day is the fullest
+      # "find the extra head" context. First peak day when the max repeats.
+      episodes$peak_date[i]      <- rows$date[which.max(excess)]
     }
     episodes
   })
@@ -1434,6 +1456,42 @@ server <- function(input, output, session) {
     overcount_aug_df, overcount_defaults, "overcount_rese_dt",
     "overcount_rese_cols", reset_events = reactive(clicked_episode()))
 
+  # Diagnostic sets for the clicked episode, all keyed on pers_id and built from
+  # the same MP predicate that produces n_seated. Bundled in one reactive so the
+  # base rows and POLI bio join happen once and every downstream table/CSV/summary
+  # stays consistent.
+  #   closing    : end_date == episode end (current behaviour; who resolved it)
+  #   opening    : start_date within [start, end] (who may have triggered it)
+  #   throughout : seated on every day of the episode (persistent-overcount pool)
+  #   peak       : everyone seated on the max-excess day (full context)
+  #   clusters   : peak-day members sharing a birth_date (duplicate-person signal)
+  overcount_sets <- reactive({
+    info <- clicked_episode()
+    req(!is.null(info))
+    ep <- info$ep
+    base <- join_poli_bio(rese_mp_rows(RESE, info$country), POLI)
+    closing <- base[!is.na(base$end_date) & base$end_date == ep$end_date, ,
+                    drop = FALSE]
+    opening <- base[!is.na(base$start_date) & base$start_date >= ep$start_date &
+                      base$start_date <= ep$end_date, , drop = FALSE]
+    throughout <- base[!is.na(base$start_date) & base$start_date <= ep$start_date &
+                         (is.na(base$end_date) | base$end_date >= ep$end_date), ,
+                       drop = FALSE]
+    peak <- seated_on(base, ep$peak_date)
+    list(ep = ep, closing = closing, opening = opening,
+         throughout = throughout, peak = peak,
+         clusters = birthdate_clusters(peak))
+  })
+
+  # Curated-column snapshots feeding the per-set CSV attachments (all rows).
+  overcount_snap <- function(which) reactive({
+    df <- overcount_sets()[[which]]
+    df[, intersect(overcount_context_cols, names(df)), drop = FALSE]
+  })
+  overcount_opening_snap    <- overcount_snap("opening")
+  overcount_peak_snap       <- overcount_snap("peak")
+  overcount_throughout_snap <- overcount_snap("throughout")
+
   output$overcount_detail <- renderUI({
     info <- clicked_episode()
     req(!is.null(info))
@@ -1441,6 +1499,9 @@ server <- function(input, output, session) {
     ep <- info$ep
     cc <- info$country
     rese_ending <- overcount_rese_ending()
+    sets <- overcount_sets()
+    cur  <- function(df) df[, intersect(overcount_context_cols, names(df)),
+                            drop = FALSE]
 
     # Determine parliament_id for the overcount episode (use midpoint)
     ep_mid <- ep$start_date + as.integer((ep$end_date - ep$start_date) / 2)
@@ -1467,8 +1528,10 @@ server <- function(input, output, session) {
     # table now carries the full (augmented) RESE rows behind the selector.
     rese_ending_summary <- rese_ending[
       , intersect(overcount_default_cols, names(rese_ending)), drop = FALSE]
-    auto_summary <- build_overcount_summary(ep, rese_ending_summary,
-                                             all_episodes = parl_episodes)
+    auto_summary <- build_overcount_summary(
+      ep, rese_ending_summary, all_episodes = parl_episodes,
+      opening = cur(sets$opening), throughout = cur(sets$throughout),
+      peak_roster = cur(sets$peak), birthdate_dupes = cur(sets$clusters))
 
     tagList(
       tags$hr(),
@@ -1500,8 +1563,51 @@ server <- function(input, output, session) {
                          style = "margin-top:6px;")
         )
       },
+      # Additional diagnostic sets (context beyond the closing set). Compact
+      # read-only tables; the full rows travel in the attached CSVs.
+      local({
+        section <- function(title, df, note = NULL) {
+          if (is.null(df) || nrow(df) == 0) return(NULL)
+          tagList(
+            tags$p(style = "font-weight:bold; margin-top:12px;", title),
+            if (!is.null(note)) tags$p(
+              style = "font-size:0.85em; color:#666; margin:0 0 4px;", note),
+            df_to_html_table(cur(df)))
+        }
+        open_ended <- sum(is.na(sets$throughout$end_date))
+        tagList(
+          section(
+            sprintf("Opening set – entries starting within the episode (%d):",
+                    nrow(sets$opening)),
+            sets$opening,
+            "An arrival dated too early can trigger the overcount."),
+          section(
+            sprintf("Present throughout the episode (%d%s):",
+                    nrow(sets$throughout),
+                    if (open_ended > 0) sprintf("; %d open-ended", open_ended) else ""),
+            sets$throughout,
+            "Candidates for a persistent overcount – watch stray open-ended records."),
+          if (nrow(sets$peak) > 0) tags$p(
+            style = "margin-top:12px;",
+            tags$b(sprintf("Peak-day roster: %d seated vs %d official on %s.",
+                           nrow(sets$peak), ep$parliament_size,
+                           format_pcc_date(ep$peak_date))),
+            tags$span(style = "color:#666;", " Full roster in the attached peak CSV.")),
+          section(
+            sprintf("Shared birth dates on the peak day (%d):", nrow(sets$clusters)),
+            sets$clusters,
+            "Members sharing a birth_date – a strong \"same person, two records\" signal.")
+        )
+      }),
       issue_path_tag(path, auto_summary, plot_key = "rese_daily",
-                     table_key = if (nrow(rese_ending) > 0) "overcount")
+                     table_key = {
+                       tk <- character(0)
+                       if (nrow(rese_ending) > 0)     tk <- c(tk, closing    = "overcount")
+                       if (nrow(sets$opening) > 0)    tk <- c(tk, opening    = "overcount_opening")
+                       if (nrow(sets$peak) > 0)       tk <- c(tk, peak       = "overcount_peak")
+                       if (nrow(sets$throughout) > 0) tk <- c(tk, throughout = "overcount_throughout")
+                       if (length(tk) > 0) tk else NULL
+                     })
     )
   })
 
@@ -1777,7 +1883,10 @@ server <- function(input, output, session) {
     parl_check   = parl_table$snapshot,
     meme_check   = meme_table$snapshot,
     poli_check   = poli_check_table$snapshot,
-    overcount    = overcount_table$snapshot,
+    overcount            = overcount_table$snapshot,   # closing set (curated DT)
+    overcount_opening    = overcount_opening_snap,
+    overcount_peak       = overcount_peak_snap,
+    overcount_throughout = overcount_throughout_snap,
     poli_missing = poli_missing_table$snapshot
   )
 

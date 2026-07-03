@@ -153,6 +153,55 @@ detail_default_cols_map <- list(
 overcount_default_cols <- c("res_entry_id", "pers_id", "res_entry_start",
                             "res_entry_end", "political_function", "parliament_id")
 
+# The three RESE political_function codes counted as parliamentary membership.
+# Kept in one place so every overcount-detail set matches build_daily_counts().
+mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+
+# Columns shown in the overcount context tables/CSVs (opening, peak roster,
+# present-throughout). Wider than overcount_default_cols: adds name + birth_date
+# so a reader can spot duplicate persons at a glance.
+overcount_context_cols <- c("res_entry_id", "pers_id", "last_name", "first_name",
+                            "birth_date", "res_entry_start", "res_entry_end",
+                            "start_date", "end_date",
+                            "political_function", "parliament_id")
+
+# RESE MP rows for one country: the base for every overcount-detail set.
+rese_mp_rows <- function(rese, cc) {
+  rese[rese$country_abb == cc & rese$political_function %in% mp_pf_codes, ]
+}
+
+# Rows seated on a given day. Same predicate that builds n_seated in
+# build_daily_counts(): started on/before the day and not yet ended (open-ended
+# entries count as still seated). NA start never counts.
+seated_on <- function(rese_cc, day) {
+  rese_cc[!is.na(rese_cc$start_date) & rese_cc$start_date <= day &
+            (is.na(rese_cc$end_date) | rese_cc$end_date >= day), , drop = FALSE]
+}
+
+# Left-join last_name/first_name/birth_date from POLI (deduped on pers_id, like
+# join_poli_ids) so overcount sets carry enough identity to eyeball duplicates.
+join_poli_bio <- function(df, poli) {
+  if (is.null(df) || !"pers_id" %in% names(df)) return(df)
+  cols <- setdiff(intersect(c("last_name", "first_name", "birth_date"),
+                            names(poli)), names(df))
+  if (length(cols) == 0) return(df)
+  bio <- poli[!duplicated(poli$pers_id), c("pers_id", cols), drop = FALSE]
+  dplyr::left_join(df, bio, by = "pers_id")
+}
+
+# Rows of a (bio-joined) roster whose birth_date is shared by another row: a
+# strong "two records, one person" signal. Blank/NA dates are ignored. Returns
+# the subset sorted by birth_date so duplicates sit together.
+birthdate_clusters <- function(roster) {
+  if (is.null(roster) || nrow(roster) == 0 || !"birth_date" %in% names(roster))
+    return(roster[0, , drop = FALSE])
+  bd  <- as.character(roster$birth_date)
+  ok  <- !is.na(bd) & bd != ""
+  dup <- ok & bd %in% bd[ok][duplicated(bd[ok])]
+  out <- roster[dup, , drop = FALSE]
+  out[order(as.character(out$birth_date)), , drop = FALSE]
+}
+
 # Country-specific POLI identifier columns, e.g. "NL" -> id_nl_pdc_num, ...
 country_id_cols <- function(col_names, cc) {
   sort(grep(paste0("^id_", tolower(cc), "_"), col_names,
@@ -237,6 +286,35 @@ df_to_md_table <- function(df, max_rows = 10) {
   paste(c(header, sep, rows), collapse = "\n")
 }
 
+# Compact read-only HTML table for the overcount context sets shown on screen
+# (the interactive DT stays reserved for the closing set). Caps rows and notes
+# the overflow so a big peak-day roster does not blow up the panel.
+df_to_html_table <- function(df, max_rows = 15) {
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  n_total <- nrow(df)
+  df <- head(df, max_rows)
+  cell <- function(x, tag) {
+    lapply(x, function(v) tag(as.character(v)))
+  }
+  header <- htmltools::tags$tr(cell(names(df), function(v)
+    htmltools::tags$th(style = "text-align:left; padding:2px 8px; border-bottom:1px solid #ccc;", v)))
+  body <- lapply(seq_len(nrow(df)), function(i) {
+    htmltools::tags$tr(cell(unlist(lapply(df[i, , drop = FALSE], as.character)),
+      function(v) htmltools::tags$td(style = "padding:2px 8px; border-bottom:1px solid #eee;",
+                                     ifelse(is.na(v) | v == "", "–", v))))
+  })
+  htmltools::tagList(
+    htmltools::tags$table(
+      style = "border-collapse:collapse; font-size:0.82em; font-family:monospace; margin:2px 0 6px;",
+      htmltools::tags$thead(header),
+      htmltools::tags$tbody(body)
+    ),
+    if (n_total > max_rows) htmltools::tags$p(
+      style = "font-size:0.8em; color:#888; margin:0 0 6px;",
+      paste0("… ", n_total - max_rows, " more row(s); full set in the attached CSV."))
+  )
+}
+
 # Build auto-summary for check failures
 build_check_summary <- function(detail_result, row_idx, key_vec) {
   det <- detail_result$details[[row_idx]]
@@ -295,22 +373,70 @@ build_completeness_summary <- function(variable, missing_df,
 
 # Build auto-summary for overcount episodes
 # Requires format_pcc_date() from R047_functions.R
-# all_episodes: optional data.frame with all overcount episodes for context
+# rese_ending  : the "closing" set (end_date == episode end) -- current behaviour
+# opening      : entries whose start_date falls within the episode window
+# throughout   : entries seated on every day of the episode
+# peak_roster  : everyone seated on the peak (max-excess) day
+# birthdate_dupes : peak-roster rows sharing a birth_date with another member
+# all_episodes : optional data.frame with all overcount episodes for context
 build_overcount_summary <- function(ep, rese_ending,
-                                    all_episodes = NULL) {
+                                    all_episodes = NULL,
+                                    opening = NULL, throughout = NULL,
+                                    peak_roster = NULL, birthdate_dupes = NULL) {
   lines <- c(
     paste0("**Episode:** ", format_pcc_date(ep$start_date), " -- ",
            format_pcc_date(ep$end_date), " (", ep$duration_days, " days)"),
     paste0("**Official parliament size:** ", ep$parliament_size),
     paste0("**Peak excess:** +", ep$peak_excess,
-           "  |  Mean excess: +", ep$mean_excess)
+           "  |  Mean excess: +", ep$mean_excess,
+           if (!is.null(ep$peak_date) && !is.na(ep$peak_date))
+             paste0("  |  Peak day: ", format_pcc_date(ep$peak_date)) else "")
   )
   if (nrow(rese_ending) > 0) {
     lines <- c(lines, "",
-               paste0("**RESE entries ending on ", format_pcc_date(ep$end_date),
-                      " (", nrow(rese_ending), "):**"),
+               paste0("**Closing set -- RESE entries ending on ",
+                      format_pcc_date(ep$end_date), " (", nrow(rese_ending),
+                      "):** their departure is what ends the overcount."),
                "", df_to_md_table(rese_ending))
   }
+  if (!is.null(opening) && nrow(opening) > 0) {
+    lines <- c(lines, "",
+               paste0("**Opening set -- entries starting within the episode (",
+                      nrow(opening), "):** an arrival too early can trigger the ",
+                      "overcount."),
+               "", df_to_md_table(opening))
+  }
+  if (!is.null(throughout) && nrow(throughout) > 0) {
+    open_ended <- sum(is.na(throughout$end_date))
+    lines <- c(lines, "",
+               paste0("**Present throughout the episode (", nrow(throughout),
+                      if (open_ended > 0)
+                        paste0("; ", open_ended, " open-ended, i.e. no end_date")
+                      else "",
+                      "):** candidates for a *persistent* overcount, especially ",
+                      "any stray open-ended record."),
+               "", df_to_md_table(throughout))
+  }
+  if (!is.null(peak_roster) && nrow(peak_roster) > 0) {
+    lines <- c(lines, "",
+               paste0("**Peak-day roster:** ", nrow(peak_roster),
+                      " seated vs ", ep$parliament_size, " official on ",
+                      format_pcc_date(ep$peak_date),
+                      " (full roster in the attached peak CSV)."))
+  }
+  if (!is.null(birthdate_dupes) && nrow(birthdate_dupes) > 0) {
+    lines <- c(lines, "",
+               paste0("**Shared birth dates on the peak day (",
+                      nrow(birthdate_dupes),
+                      "):** members sharing a birth_date -- a strong ",
+                      "\"same person, two records\" signal."),
+               "", df_to_md_table(birthdate_dupes))
+  }
+  lines <- c(lines, "",
+             paste0("_Interpretation: an overcount is too many overlapping ",
+                    "tenures. Likely error classes -- a late/ missing end_date, ",
+                    "a too-early start_date, or one person recorded under two ",
+                    "pers_ids. When possible, name the specific pers_id(s)._"))
   if (!is.null(all_episodes) && nrow(all_episodes) > 0) {
     ep_display <- data.frame(
       start      = sapply(all_episodes$start_date, format_pcc_date),
@@ -429,11 +555,15 @@ save_issue_plot <- function(plot_obj, width = 10, height = 5, dpi = 150) {
 # coding agent given an issue URL can reconstruct the filename from the
 # issue's labels and number (e.g. "NL / POLI / completeness / death_date"
 # + issue 42 -> "NL_POLI_completeness_death_date_issue42.csv").
-issue_asset_filename <- function(issue_path_str, issue_number, ext) {
+issue_asset_filename <- function(issue_path_str, issue_number, ext, suffix = NULL) {
   sanitized <- gsub("[^a-zA-Z0-9_]", "_", issue_path_str)
   sanitized <- gsub("_+", "_", sanitized)
   sanitized <- gsub("^_|_$", "", sanitized)
-  paste0(sanitized, "_issue", issue_number, ".", ext)
+  stem <- paste0(sanitized, "_issue", issue_number)
+  # suffix distinguishes the several CSVs one panel can attach (e.g. "peak",
+  # "opening"); empty/NULL keeps the historical single-file stem intact.
+  if (!is.null(suffix) && nzchar(suffix)) stem <- paste0(stem, "_", suffix)
+  paste0(stem, ".", ext)
 }
 
 # Build the image filename from issue path and issue number
