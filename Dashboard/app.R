@@ -351,10 +351,12 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "auto_summary: document.getElementById('%s').value, ",
               "title_id: '%s_title', ",
               "desc_id: '%s_text', ",
+              "plot_key: '%s', ",
               "btn_id: this.id, ",
               "nonce: Math.random()});"
             ),
-            path_js, auto_id, form_id, form_id
+            path_js, auto_id, form_id, form_id,
+            if (is.null(plot_key)) "" else plot_key
           ),
           id = paste0(form_id, "_ai_btn")
         ),
@@ -824,11 +826,29 @@ server <- function(input, output, session) {
     desc_id  <- info$desc_id
     btn_id   <- info$btn_id
 
+    # If the panel has an associated dashboard graph, render it to a PNG and
+    # attach it to the description call so the LLM diagnoses from the graph
+    # itself (boundary key facts alone are easy to over-read).
+    plot_key  <- if (is.null(info$plot_key)) "" else info$plot_key
+    img_path  <- NULL
+    img_capt  <- NULL
+    if (nzchar(plot_key)) {
+      plot_source <- issue_plot_sources[[plot_key]]
+      plot_obj <- if (!is.null(plot_source)) plot_source()
+      if (!is.null(plot_obj)) {
+        img_path <- save_issue_plot(plot_obj)
+        img_capt <- issue_plot_captions[[plot_key]]
+      }
+    }
+
     withProgress(message = "Generating with AI...", value = 0.3, {
       title <- llm_generate_title(path, auto_summary)
       setProgress(0.6, detail = "Generating description...")
-      desc  <- llm_generate_description(path, auto_summary)
+      desc  <- llm_generate_description(path, auto_summary,
+                                        image = img_path,
+                                        graph_caption = img_capt)
     })
+    if (!is.null(img_path)) unlink(img_path)
 
     # Push results back into the form fields via JS
     session$sendCustomMessage("fillField", list(id = title_id, value = title))

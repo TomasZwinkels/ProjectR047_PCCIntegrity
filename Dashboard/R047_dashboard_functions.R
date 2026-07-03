@@ -531,7 +531,10 @@ codex_model <- NULL
 # Low-level Codex query (adapted from R056 for long prompts).
 # Writes the prompt to a temp file, then asks Codex to follow the
 # instructions in that file. Returns the response string, or NULL on failure.
-codex_query <- function(prompt, model = codex_model) {
+# image: optional path(s) to image files attached to the prompt (codex exec
+# -i), so the model can actually look at a graph instead of only reading
+# numbers about it.
+codex_query <- function(prompt, model = codex_model, image = NULL) {
   out_file    <- tempfile(fileext = ".txt")
   prompt_file <- tempfile(fileext = ".md")
   tryCatch({
@@ -543,12 +546,18 @@ codex_query <- function(prompt, model = codex_model) {
     model_flag <- if (!is.null(model)) {
       paste("-m", shQuote(model))
     } else ""
+    if (is.null(image)) image <- character(0)
+    image <- image[file.exists(image)]
+    image_flags <- if (length(image) > 0) {
+      paste("-i", vapply(image, shQuote, character(1)), collapse = " ")
+    } else ""
     cmd <- paste(
       "codex exec",
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check",
       "--ephemeral",
       model_flag,
+      image_flags,
       "-o", shQuote(out_file),
       shQuote(instruction),
       "< /dev/null 2>/dev/null"
@@ -578,13 +587,34 @@ build_title_prompt <- function(issue_path_str, auto_summary) {
   )
 }
 
-# Build the prompt for generating an issue description
-build_description_prompt <- function(issue_path_str, auto_summary) {
+# Build the prompt for generating an issue description.
+# graph_caption: non-NULL when the dashboard graph is attached as an image to
+# the LLM call. The instructions then anchor the diagnosis on the graph: the
+# boundary key facts alone are easy to over-read (e.g. "last date with any
+# seated MP" only means >= 1 seated MP, not a complete chamber), while the
+# graph shows whether coverage was complete, eroding, or absent around the
+# relevant dates.
+build_description_prompt <- function(issue_path_str, auto_summary,
+                                     graph_caption = NULL) {
+  graph_part <- if (!is.null(graph_caption)) {
+    paste0(
+      "Attached is an image of the dashboard graph (", graph_caption, "). ",
+      "Have a good look at this graph before writing: base your diagnosis ",
+      "on what it actually shows around the relevant dates — e.g. whether ",
+      "coverage is complete up to a sudden cliff, gradually eroding, or ",
+      "absent for a whole period. ",
+      "Be careful with boundary key facts such as the last date with any ",
+      "seated MP: they only mean at least one MP was seated on that date, ",
+      "NOT that the parliament was complete then — use the graph to tell ",
+      "the difference. "
+    )
+  } else ""
   paste0(
     "You are a data quality assistant for a parliamentary dataset ",
     "(the Political Careers In Comparison Project / PCC). ",
     "Given the following issue classification and technical details, ",
     "write a GitHub issue description. ",
+    graph_part,
     "Start with a concise 1-2 sentence summary (## Summary), ",
     "then provide a more elaborate description below (## Details) ",
     "covering the problem and affected data. ",
@@ -615,10 +645,16 @@ llm_generate_title <- function(issue_path_str, auto_summary) {
 }
 
 # Generate an issue description via LLM.
+# image/graph_caption: optional PNG of the dashboard graph shown above the
+# issue form; when given, the image is attached to the Codex call and the
+# prompt tells the model to base its diagnosis on the graph.
 # Returns the LLM description, or empty string as fallback.
-llm_generate_description <- function(issue_path_str, auto_summary) {
+llm_generate_description <- function(issue_path_str, auto_summary,
+                                     image = NULL, graph_caption = NULL) {
   result <- codex_query(
-    build_description_prompt(issue_path_str, auto_summary)
+    build_description_prompt(issue_path_str, auto_summary,
+                             graph_caption = graph_caption),
+    image = image
   )
   if (is.null(result) || nchar(result) == 0 ||
       tolower(result) == "error") {

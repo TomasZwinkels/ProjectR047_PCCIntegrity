@@ -409,17 +409,17 @@ test_that("build_check_summary renders a Key facts block from summary_stats", {
           stringsAsFactors = FALSE
         ),
         summary_stats = c(
-          "last covered date before" = "02oct2024",
-          "first date with no data"  = "03oct2024",
-          "episodes ending on last covered date" = "150"
+          "last date with any seated MP before" = "02oct2024",
+          "zero seated MPs from"                = "03oct2024",
+          "episodes ending on that last date"   = "150"
         )
       )
     )
   )
   summary <- build_check_summary(result, 1, "boundary_episodes")
   expect_true(grepl("\\*\\*Key facts:\\*\\*", summary))
-  expect_true(grepl("\\*\\*last covered date before:\\*\\* 02oct2024", summary))
-  expect_true(grepl("\\*\\*first date with no data:\\*\\* 03oct2024", summary))
+  expect_true(grepl("\\*\\*last date with any seated MP before:\\*\\* 02oct2024", summary))
+  expect_true(grepl("\\*\\*zero seated MPs from:\\*\\* 03oct2024", summary))
   expect_true(grepl("150", summary))
   expect_true(grepl("NL_A_1970", summary))     # table preview still present
 })
@@ -547,6 +547,26 @@ test_that("build_description_prompt includes issue path and summary", {
   expect_true(grepl("NL / RESE / check / full_overlap", prompt))
   expect_true(grepl("3", prompt))
   expect_true(grepl("markdown", prompt, ignore.case = TRUE))
+})
+
+test_that("build_description_prompt without graph_caption has no graph instructions", {
+  prompt <- build_description_prompt(
+    "NL / RESE / check / full_overlap",
+    "**Problem rows:** 3"
+  )
+  expect_false(grepl("dashboard graph", prompt))
+})
+
+test_that("build_description_prompt with graph_caption anchors diagnosis on the graph", {
+  prompt <- build_description_prompt(
+    "NL / RESE / check / coverage_at_date_to",
+    "**Key facts:**\n- last date with any seated MP before: 02oct2024",
+    graph_caption = "Daily seated MPs vs official parliament size"
+  )
+  expect_true(grepl("Daily seated MPs vs official parliament size", prompt))
+  expect_true(grepl("good look at this graph", prompt))
+  # Must warn the model that boundary facts do not imply a complete chamber
+  expect_true(grepl("NOT that the parliament was complete", prompt))
 })
 
 # --- issue_image_filename ---

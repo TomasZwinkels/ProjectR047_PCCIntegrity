@@ -1609,6 +1609,55 @@ test_that("details: PASS scenario returns gap_count = 0 and empty parliaments_no
   expect_equal(result$gap_count, 0L)
   expect_equal(nrow(result$parliaments_no_data), 0L)
   expect_equal(result$parliaments_checked, 2L)
+  expect_null(result$summary_stats)
+  expect_equal(nrow(result$boundary_episodes), 0L)
+  expect_true("boundary_side" %in% names(result$boundary_episodes))
+})
+
+test_that("details: FAIL exposes key facts and boundary episodes like the at-date checks", {
+  # Two episodes both end on 2001-12-31; the 2003 parliament start has no data.
+  rese <- mk_coverage_rese(c("2000-01-01", "2000-01-01"),
+                           c("2001-12-31", "2001-12-31"))
+  parl <- mk_coverage_parl(c("2000-01-15", "2003-06-01"))
+  result <- check_RESE_parlmem_coverage_details(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31"))
+  expect_false(result$check_passed)
+
+  st <- result$summary_stats
+  expect_equal(unname(st["parliament start dates checked"]),         "2")
+  expect_equal(unname(st["parliament starts with zero seated MPs"]), "1")
+  expect_equal(unname(st["first parliament start with no data"]),    "01jun2003")
+  expect_equal(unname(st["last parliament start with no data"]),     "01jun2003")
+  expect_equal(unname(st["last date with any seated MP before"]),    "31dec2001")
+  expect_equal(unname(st["MPs seated on that last date"]),           "2")
+  expect_equal(unname(st["episodes ending on that last date"]),      "2")
+  expect_equal(unname(st["zero seated MPs from"]),                   "01jan2002")
+  expect_equal(unname(st["gap length before date (days)"]),          "517")
+  expect_equal(unname(st["first date with any seated MP after"]),    "none")
+
+  be <- result$boundary_episodes
+  expect_equal(nrow(be), 2L)
+  expect_true(all(be$boundary_side == "last_end_before_date"))
+})
+
+test_that("details: mid-range gap is characterized on both sides", {
+  # Data stops end of 2001 and resumes 2003-09-01; only the 2002 parliament
+  # start falls in the hole.
+  rese <- mk_coverage_rese(c("2000-01-01", "2003-09-01"),
+                           c("2001-12-31", "2005-12-31"))
+  parl <- mk_coverage_parl(c("2000-01-15", "2002-06-01", "2004-01-15"))
+  result <- check_RESE_parlmem_coverage_details(
+    rese, parl, "TK", as.Date("1990-01-01"), as.Date("2025-12-31"))
+  expect_false(result$check_passed)
+  expect_equal(result$gap_count, 1L)
+
+  st <- result$summary_stats
+  expect_equal(unname(st["first parliament start with no data"]),  "01jun2002")
+  expect_equal(unname(st["last date with any seated MP before"]),  "31dec2001")
+  expect_equal(unname(st["first date with any seated MP after"]),  "01sep2003")
+  expect_equal(unname(st["MPs seated on that first date"]),        "1")
+  expect_setequal(result$boundary_episodes$boundary_side,
+                  c("last_end_before_date", "first_start_after_date"))
 })
 
 # ==================================================================
@@ -1675,13 +1724,14 @@ test_that("details: boundary stats for a gap BEFORE the checked date", {
   expect_false(result$check_passed)
 
   st <- result$summary_stats
-  expect_equal(unname(st["date checked"]),                         "15jun2002")
-  expect_equal(unname(st["last covered date before"]),             "31dec2001")
-  expect_equal(unname(st["first date with no data"]),              "01jan2002")
-  expect_equal(unname(st["gap length before date (days)"]),        "166")
-  expect_equal(unname(st["episodes ending on last covered date"]), "2")
-  expect_equal(unname(st["next covered date after"]),              "none")
-  expect_equal(unname(st["ongoing episodes (no end date)"]),       "0")
+  expect_equal(unname(st["date checked"]),                          "15jun2002")
+  expect_equal(unname(st["last date with any seated MP before"]),   "31dec2001")
+  expect_equal(unname(st["MPs seated on that last date"]),          "2")
+  expect_equal(unname(st["zero seated MPs from"]),                  "01jan2002")
+  expect_equal(unname(st["gap length before date (days)"]),         "166")
+  expect_equal(unname(st["episodes ending on that last date"]),     "2")
+  expect_equal(unname(st["first date with any seated MP after"]),   "none")
+  expect_equal(unname(st["ongoing episodes (no end date)"]),        "0")
 
   be <- result$boundary_episodes
   expect_equal(nrow(be), 2L)
@@ -1698,10 +1748,12 @@ test_that("details: boundary stats for a gap AFTER the checked date", {
   expect_false(result$check_passed)
 
   st <- result$summary_stats
-  expect_equal(unname(st["last covered date before"]),               "none")
-  expect_equal(unname(st["next covered date after"]),                "01jan2003")
-  expect_equal(unname(st["gap length after date (days)"]),           "200")
-  expect_equal(unname(st["episodes starting on next covered date"]), "2")
+  expect_equal(unname(st["last date with any seated MP before"]),   "none")
+  expect_equal(unname(st["MPs seated on that last date"]),          "NA")
+  expect_equal(unname(st["first date with any seated MP after"]),   "01jan2003")
+  expect_equal(unname(st["MPs seated on that first date"]),         "2")
+  expect_equal(unname(st["gap length after date (days)"]),          "200")
+  expect_equal(unname(st["episodes starting on that first date"]),  "2")
 
   be <- result$boundary_episodes
   expect_equal(nrow(be), 2L)
@@ -1724,10 +1776,25 @@ test_that("details: no episodes at all yields empty boundary df and 'none' stats
   rese <- mk_at_date_rese(character(0), character(0))
   result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
   expect_false(result$check_passed)
-  expect_equal(unname(result$summary_stats["last covered date before"]), "none")
-  expect_equal(unname(result$summary_stats["next covered date after"]),  "none")
+  expect_equal(unname(result$summary_stats["last date with any seated MP before"]), "none")
+  expect_equal(unname(result$summary_stats["first date with any seated MP after"]), "none")
   expect_equal(nrow(result$boundary_episodes), 0L)
   expect_true("boundary_side" %in% names(result$boundary_episodes))
+})
+
+test_that("details: erosion signature — few MPs seated on the last covered date", {
+  # Coverage erodes: 3 MPs early on, but only 1 still seated on the last
+  # covered date. "MPs seated on that last date" must NOT suggest a complete
+  # chamber ended there.
+  rese <- mk_at_date_rese(
+    c("2000-01-01", "2000-01-01", "2000-01-01"),
+    c("2001-06-30", "2001-09-30", "2001-12-31")
+  )
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  st <- result$summary_stats
+  expect_equal(unname(st["last date with any seated MP before"]), "31dec2001")
+  expect_equal(unname(st["MPs seated on that last date"]),        "1")
+  expect_equal(unname(st["episodes ending on that last date"]),   "1")
 })
 
 test_that("details: ongoing episode passes and is counted in the stats", {
