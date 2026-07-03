@@ -8,11 +8,50 @@
 
 # Writes a data.frame to a semicolon-delimited CSV matching the PCCdata
 # format (source files are read with sep = ";"). NA is written as an empty
-# string so exports round-trip cleanly via read.csv(..., sep = ";"), and the
-# file is UTF-8 encoded. `file` may be a path or a connection.
+# string so exports round-trip cleanly, and the file is UTF-8 encoded.
+#
+# The file is prefixed with a UTF-8 BOM and an Excel `sep=;` preamble line so
+# that double-clicking it in a European Excel (list separator = ";") lands the
+# data in the right columns and renders accented names (e.g. Ellemeet, Groningen
+# with a diaeresis) correctly. The `sep=;` line is an Excel-specific hint, not
+# part of the CSV standard; read the file back with read_csv_with_excel_sep()
+# (R047_functions.R), which skips the preamble and strips the BOM.
+#
+# `file` is a path. (Both call sites pass a tempfile / downloadHandler path.)
+#
+# Because the file starts with a UTF-8 BOM, every byte written after it must be
+# valid UTF-8 \u2014 source data occasionally carries stray latin1 bytes (e.g. a
+# 0xE7 "\u00e7" in a POLI first_name broke the issue-#16 attachment: the then-current
+# write.table(fileEncoding=) conversion truncated mid-field with only a
+# warning, leaving an unbalanced quote that made quote-aware parsers silently
+# drop ~450 following rows). All text is therefore repaired to valid UTF-8
+# before writing.
 write_pcc_csv <- function(df, file) {
-  write.table(df, file, sep = ";", row.names = FALSE, na = "",
-              qmethod = "double", fileEncoding = "UTF-8")
+  text_cols <- vapply(df, function(col) is.character(col) || is.factor(col),
+                      logical(1))
+  df[text_cols] <- lapply(df[text_cols],
+                          function(col) repair_utf8(as.character(col)))
+  names(df) <- repair_utf8(names(df))
+
+  con <- base::file(file, open = "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(charToRaw("\ufeff"), con)          # UTF-8 BOM
+  writeLines("sep=;", con, useBytes = TRUE)   # Excel separator hint
+  utils::write.table(df, con, sep = ";", row.names = FALSE, na = "",
+                     qmethod = "double", fileEncoding = "UTF-8")
+}
+
+# Repair a character vector to valid UTF-8. Valid strings (and NA) pass
+# through unchanged; strings with a declared latin1/native encoding are
+# converted by enc2utf8(); any string still holding invalid byte sequences is
+# reinterpreted as latin1 \u2014 every byte value is defined in latin1, so this
+# never fails or drops data, and it recovers the common legacy case (single
+# high bytes like 0xE7 "\u00e7" from pre-UTF-8 sources).
+repair_utf8 <- function(x) {
+  x <- enc2utf8(x)
+  invalid <- !is.na(x) & !validUTF8(x)
+  if (any(invalid)) x[invalid] <- iconv(x[invalid], from = "latin1", to = "UTF-8")
+  x
 }
 
 # --- Issue identifier vectors (one per check, matching check order) ---
@@ -67,9 +106,13 @@ detail_default_cols_map <- list(
     parlmem_coverage      = c("parliament_id", "leg_period_start",
                               "leg_period_end", "assembly_abb",
                               "parliament_size", "n_seated"),
-    # 2-column snapshot: show everything
-    coverage_at_date_from = c("date_checked", "n_seated"),
-    coverage_at_date_to   = c("date_checked", "n_seated")
+    # Boundary episodes: the RESE rows marking where the data stops/resumes
+    coverage_at_date_from = c("boundary_side", "res_entry_id", "pers_id",
+                              "res_entry_start", "res_entry_end",
+                              "political_function", "parliament_id"),
+    coverage_at_date_to   = c("boundary_side", "res_entry_id", "pers_id",
+                              "res_entry_start", "res_entry_end",
+                              "political_function", "parliament_id")
   ),
   PARL = list(
     dates_parsed          = c("parliament_id", "leg_period_start",
@@ -206,6 +249,14 @@ build_check_summary <- function(detail_result, row_idx, key_vec) {
     paste0("**Status:** ", detail_result$table$Status[row_idx]),
     paste0("**Problem rows:** ", n)
   )
+  # Checks can expose a named vector of key facts (det$summary_stats); render
+  # them prominently so issue descriptions (and their LLM generator) see the
+  # actual diagnosis, not just a row count.
+  if (!is.null(det$summary_stats) && length(det$summary_stats) > 0) {
+    lines <- c(lines, "", "**Key facts:**",
+               paste0("- **", names(det$summary_stats), ":** ",
+                      unname(det$summary_stats)))
+  }
   if (n > 0) {
     lines <- c(lines, "",
                paste0("**First ", min(n, 10), " of ", n, " rows:**"),

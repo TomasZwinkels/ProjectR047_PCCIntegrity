@@ -10,7 +10,7 @@ library(testthat)
 
 # --- write_pcc_csv ---
 
-test_that("write_pcc_csv round-trips values via read.csv(sep = ';')", {
+test_that("write_pcc_csv round-trips values via read_csv_with_excel_sep()", {
   df <- data.frame(
     pers_id = c("CA_Smith_John_1950", "CA_Doe_Jane_1962"),
     seats   = c(1L, 2L),
@@ -20,11 +20,27 @@ test_that("write_pcc_csv round-trips values via read.csv(sep = ';')", {
   on.exit(unlink(tmp), add = TRUE)
 
   write_pcc_csv(df, tmp)
-  back <- read.csv(tmp, sep = ";", stringsAsFactors = FALSE)
+  back <- read_csv_with_excel_sep(tmp, sep = ";", stringsAsFactors = FALSE)
 
-  expect_equal(names(back), names(df))
+  expect_equal(names(back), names(df))   # no BOM leak into first column name
   expect_equal(back$pers_id, df$pers_id)
   expect_equal(back$seats, df$seats)
+})
+
+test_that("write_pcc_csv prefixes a UTF-8 BOM and a 'sep=;' Excel preamble", {
+  df <- data.frame(a = "x", b = "y", stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+
+  # First three raw bytes are the UTF-8 BOM (EF BB BF).
+  raw3 <- readBin(tmp, what = "raw", n = 3)
+  expect_equal(raw3, as.raw(c(0xEF, 0xBB, 0xBF)))
+
+  # First text line (after the BOM) is exactly the Excel separator hint.
+  first_line <- sub("^﻿", "", readLines(tmp, n = 1))
+  expect_equal(first_line, "sep=;")
 })
 
 test_that("write_pcc_csv uses ';' as the field separator", {
@@ -33,10 +49,10 @@ test_that("write_pcc_csv uses ';' as the field separator", {
   on.exit(unlink(tmp), add = TRUE)
 
   write_pcc_csv(df, tmp)
-  lines <- readLines(tmp)
+  data_lines <- readLines(tmp)[-1]      # drop the sep=; preamble line
 
-  expect_true(all(grepl(";", lines)))   # header + every data row
-  expect_false(any(grepl(",", lines)))  # no comma separators leak in
+  expect_true(all(grepl(";", data_lines)))   # header + every data row
+  expect_false(any(grepl(",", data_lines)))  # no comma separators leak in
 })
 
 test_that("write_pcc_csv writes NA as an empty field, not the literal 'NA'", {
@@ -54,7 +70,7 @@ test_that("write_pcc_csv writes NA as an empty field, not the literal 'NA'", {
   # No cell should contain the string "NA"
   expect_false(any(grepl("NA", lines)))
 
-  back <- read.csv(tmp, sep = ";", stringsAsFactors = FALSE)
+  back <- read_csv_with_excel_sep(tmp, sep = ";", stringsAsFactors = FALSE)
   expect_true(is.na(back$b[1]))   # blank numeric field reads back as NA
   expect_equal(back$b[2], 2L)
 })
@@ -65,7 +81,7 @@ test_that("write_pcc_csv omits row names", {
   on.exit(unlink(tmp), add = TRUE)
 
   write_pcc_csv(df, tmp)
-  header <- readLines(tmp)[1]
+  header <- readLines(tmp)[2]   # line 1 is the sep=; preamble
 
   # Header is exactly the single quoted column name, no leading rowname column
   expect_equal(header, "\"a\"")
@@ -77,10 +93,61 @@ test_that("write_pcc_csv preserves UTF-8 characters", {
   on.exit(unlink(tmp), add = TRUE)
 
   write_pcc_csv(df, tmp)
-  back <- read.csv(tmp, sep = ";", fileEncoding = "UTF-8",
-                   stringsAsFactors = FALSE)
+  back <- read_csv_with_excel_sep(tmp, sep = ";", stringsAsFactors = FALSE)
 
   expect_equal(back$name, "Müller")
+})
+
+# Regression for PCCdata issue #16: a latin1 0xE7 ("ç") in a POLI first_name
+# produced a truncated field with an unbalanced quote, silently dropping ~450
+# following rows for quote-aware parsers. The writer must emit valid UTF-8
+# whatever bytes arrive.
+test_that("write_pcc_csv repairs invalid (latin1) bytes instead of corrupting output", {
+  latin1_name <- rawToChar(as.raw(c(charToRaw("Willem-Fran"), 0xE7,
+                                    charToRaw("ois-Ewoud"))))
+  df <- data.frame(
+    pers_id    = c("NL_before", "NL_vanderFeltz_Willem_1882", "NL_after"),
+    first_name = c("Jan", latin1_name, "Piet"),
+    stringsAsFactors = FALSE
+  )
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  expect_no_warning(write_pcc_csv(df, tmp))
+
+  # Every line is valid UTF-8 with balanced quotes — nothing truncated.
+  lines <- readLines(tmp, encoding = "UTF-8")
+  expect_true(all(validUTF8(lines)))
+  quote_counts <- vapply(lines, function(l)
+    lengths(regmatches(l, gregexpr("\"", l))), integer(1), USE.NAMES = FALSE)
+  expect_true(all(quote_counts %% 2 == 0))
+
+  # All rows survive the round trip, and the ç is recovered, not dropped.
+  back <- read_csv_with_excel_sep(tmp, sep = ";", stringsAsFactors = FALSE)
+  expect_equal(nrow(back), 3L)
+  expect_equal(back$pers_id, df$pers_id)
+  expect_equal(back$first_name[2], "Willem-François-Ewoud")
+})
+
+test_that("write_pcc_csv converts declared-latin1 strings to UTF-8", {
+  name <- "Fran\xe7ois"
+  Encoding(name) <- "latin1"
+  df <- data.frame(first_name = name, stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp), add = TRUE)
+
+  write_pcc_csv(df, tmp)
+  back <- read_csv_with_excel_sep(tmp, sep = ";", stringsAsFactors = FALSE)
+
+  expect_equal(back$first_name, "François")
+})
+
+test_that("repair_utf8 leaves valid UTF-8 and NA untouched", {
+  x <- c("Müller", NA, "plain")
+  expect_equal(repair_utf8(x), x)
+  bad <- rawToChar(as.raw(c(charToRaw("a"), 0xE9, charToRaw("b"))))
+  expect_equal(repair_utf8(bad), "aéb")
+  expect_true(validUTF8(repair_utf8(bad)))
 })
 
 # --- country_id_cols ---
@@ -326,6 +393,45 @@ test_that("build_check_summary includes check name, status, and row count", {
   expect_true(grepl("FAIL", summary))
   expect_true(grepl("Problem rows.*2", summary))
   expect_true(grepl("NL_A_1990", summary))
+})
+
+test_that("build_check_summary renders a Key facts block from summary_stats", {
+  result <- list(
+    table = data.frame(
+      Check = "≥1 seated MP in RESE on date_to", Status = "FAIL",
+      stringsAsFactors = FALSE
+    ),
+    details = list(
+      list(
+        boundary_episodes = data.frame(
+          boundary_side = "last_end_before_date",
+          pers_id = "NL_A_1970",
+          stringsAsFactors = FALSE
+        ),
+        summary_stats = c(
+          "last covered date before" = "02oct2024",
+          "first date with no data"  = "03oct2024",
+          "episodes ending on last covered date" = "150"
+        )
+      )
+    )
+  )
+  summary <- build_check_summary(result, 1, "boundary_episodes")
+  expect_true(grepl("\\*\\*Key facts:\\*\\*", summary))
+  expect_true(grepl("\\*\\*last covered date before:\\*\\* 02oct2024", summary))
+  expect_true(grepl("\\*\\*first date with no data:\\*\\* 03oct2024", summary))
+  expect_true(grepl("150", summary))
+  expect_true(grepl("NL_A_1970", summary))     # table preview still present
+})
+
+test_that("build_check_summary omits Key facts when summary_stats is absent", {
+  result <- list(
+    table = data.frame(Check = "Some check", Status = "FAIL",
+                       stringsAsFactors = FALSE),
+    details = list(list(problem_rows = data.frame(x = 1)))
+  )
+  summary <- build_check_summary(result, 1, "problem_rows")
+  expect_false(grepl("Key facts", summary))
 })
 
 test_that("build_check_summary handles PASS with 0 rows", {

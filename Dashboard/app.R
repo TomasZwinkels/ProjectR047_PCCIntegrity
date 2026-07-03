@@ -215,13 +215,15 @@ run_rese_checks <- function(cc, date_from, date_to) {
 rese_detail_keys <- c(
   "missing_rows", "duplicate_rows", "full_rows_with_na_dates",
   "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs",
-  "parliaments_no_data", "snapshot_row", "snapshot_row"
+  "parliaments_no_data", "boundary_episodes", "boundary_episodes"
 )
 
 # Render the issue path with an "Open new issue" button and inline form.
 # table_key: non-NULL when the panel has a problem table that can be uploaded
 # as a CSV attachment; the key selects the table in issue_table_sources.
-issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
+# plot_key: non-NULL when a graph on the panel's tab can be attached; the key
+# selects the plot in issue_plot_sources.
+issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
                            repo = github_defaults$repo, table_key = NULL) {
   form_id <- gsub("[^a-zA-Z0-9]", "_", path)
   path_js <- gsub("'", "\\\\'", path)
@@ -309,7 +311,7 @@ issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
         auto_summary,
         style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace; background:#f9f9f9; color:#444;"
       ),
-      if (has_plot) tags$div(
+      if (!is.null(plot_key)) tags$div(
         style = "margin-top:6px;",
         tags$label(
           style = "font-size:0.9em; color:#555; cursor:pointer;",
@@ -319,7 +321,7 @@ issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
             checked = "checked",
             style = "margin-right:5px;"
           ),
-          "Add completeness graph from above"
+          "Attach the graph shown above"
         )
       ),
       if (!is.null(table_key)) tags$div(
@@ -369,13 +371,16 @@ issue_path_tag <- function(path, auto_summary = "", has_plot = FALSE,
               "repo: document.getElementById('%s_repo').value, ",
               "asset_repo: document.getElementById('%s_asset_repo').value, ",
               "has_plot: (function(){ var cb = document.getElementById('%s_attach_plot'); return cb ? cb.checked : false; })(), ",
+              "plot_key: '%s', ",
               "table_key: '%s', ",
               "attach_table: (function(){ var cb = document.getElementById('%s_attach_table'); return cb ? cb.checked : false; })(), ",
               "nonce: Math.random()});"
             ),
             path_js, form_id, form_id, auto_id, settings_id, settings_id,
-            form_id, if (is.null(table_key)) "" else table_key, form_id
-          )
+            form_id, if (is.null(plot_key)) "" else plot_key,
+            if (is.null(table_key)) "" else table_key, form_id
+          ),
+          id = paste0(form_id, "_post_btn")
         ),
         tags$button(
           "\u2699",
@@ -516,7 +521,8 @@ checks_dt <- function(df) {
 detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
                              issue_path_str = NULL, download_id = NULL,
                              cols_input_id = NULL, col_choices = NULL,
-                             col_selected = NULL, table_key = NULL) {
+                             col_selected = NULL, table_key = NULL,
+                             plot_key = NULL) {
   status <- result$table$Status[row_idx]
   label  <- result$table$Check[row_idx]
 
@@ -531,7 +537,20 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
   path_tag <- if (!is.null(issue_path_str)) {
     issue_path_tag(issue_path_str, auto_summary,
                    # CSV attachment only offered when there is a table to attach
-                   table_key = if (status == "FAIL" && n > 0) table_key)
+                   table_key = if (status == "FAIL" && n > 0) table_key,
+                   plot_key  = plot_key)
+  }
+
+  # Key facts exposed by the check (e.g. data-boundary statistics) — shown
+  # even when the problem table has no rows.
+  stats_tag <- if (!is.null(det$summary_stats) && length(det$summary_stats) > 0) {
+    tags$ul(
+      style = "font-size:0.9em; color:#444; margin-top:4px;",
+      lapply(seq_along(det$summary_stats), function(k) {
+        tags$li(tags$b(paste0(names(det$summary_stats)[k], ": ")),
+                unname(det$summary_stats[k]))
+      })
+    )
   }
 
   if (status == "PASS") {
@@ -548,6 +567,7 @@ detail_header_ui <- function(result, row_idx, key_vec, dt_output_id,
     tags$p(style = "font-weight:bold; color:#c0392b;",
            paste0("Details: ", label,
                   " (", n, " problem row", if (n != 1) "s", ")")),
+    stats_tag,
     if (n == 0)
       tags$p(style = "color:#666;", "(No problem rows returned by details function.)")
     else
@@ -588,6 +608,32 @@ ui <- fluidPage(
         labels: msg.labels, div_id: msg.div_id, repo: msg.repo,
         nonce: Math.random()
       });
+    });
+    Shiny.addCustomMessageHandler('markIssuePosted', function(msg) {
+      var form = document.getElementById(msg.form_id);
+      if (form) {
+        form.style.border = '2px solid #28a745';
+        form.style.background = '#f0fff4';
+        var banner = document.getElementById(msg.form_id + '_posted_banner');
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.id = msg.form_id + '_posted_banner';
+          banner.style.cssText = 'margin:-4px 0 10px 0; padding:8px 10px; ' +
+            'background:#28a745; color:#fff; border-radius:3px; ' +
+            'font-weight:bold; font-size:0.9em;';
+          form.insertBefore(banner, form.firstChild);
+        }
+        banner.innerHTML = '✓ Issue posted' +
+          (msg.number ? ' as #' + msg.number : '') +
+          ' — see the open-issues list above.';
+      }
+      var btn = document.getElementById(msg.form_id + '_post_btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Posted ✓';
+        btn.classList.remove('btn-success');
+        btn.classList.add('btn-secondary');
+      }
     });
   "))),
   titlePanel("R047 PCC Data Dashboard"),
@@ -835,9 +881,18 @@ server <- function(input, output, session) {
         type = "message", duration = 8
       )
 
+      # Mark the form as posted (green border + banner, disable Post button) so
+      # the success is visually obvious and re-posting is blocked.
+      session$sendCustomMessage("markIssuePosted", list(
+        form_id = gsub("[^a-zA-Z0-9]", "_", info$path),
+        number  = result$issue_number
+      ))
+
       # If a plot is available, upload it and append to the issue
-      if (has_plot && !is.na(result$issue_number)) {
-        plot_obj <- last_poli_plot()
+      plot_key <- if (is.null(info$plot_key)) "" else info$plot_key
+      if (has_plot && nzchar(plot_key) && !is.na(result$issue_number)) {
+        plot_source <- issue_plot_sources[[plot_key]]
+        plot_obj <- if (!is.null(plot_source)) plot_source()
         if (!is.null(plot_obj)) {
           setProgress(0.6, detail = "Uploading graph...")
           png_path <- save_issue_plot(plot_obj)
@@ -849,7 +904,7 @@ server <- function(input, output, session) {
             setProgress(0.9, detail = "Attaching graph to issue...")
             gh_append_image_to_issue(
               repo, result$issue_number, image_url,
-              caption = "Completeness over time"
+              caption = issue_plot_captions[[plot_key]]
             )
             showNotification(
               "Graph attached to issue.",
@@ -1097,7 +1152,8 @@ server <- function(input, output, session) {
                      cols_input_id = "rese_detail_cols",
                      col_choices   = if (has_rows) names(rese_aug_df()),
                      col_selected  = if (has_rows) rese_default_cols(),
-                     table_key     = "rese_check")
+                     table_key     = "rese_check",
+                     plot_key      = "rese_daily")
   })
   output$rese_detail_download <- downloadHandler(
     filename = function() paste0(input$country_select, "_RESE_check_",
@@ -1165,6 +1221,7 @@ server <- function(input, output, session) {
   # --- Daily MP counts graph (RESE_MP tab) ---
 
   last_poli_plot <- reactiveVal(NULL)
+  last_rese_daily_plot <- reactiveVal(NULL)
   clicked_episode <- reactiveVal(NULL)
 
   daily_cache_version <- reactiveVal(0)
@@ -1224,7 +1281,7 @@ server <- function(input, output, session) {
       df <- df[order(df$date, df$segment), ]
     }
 
-    ggplot(df, aes(x = date)) +
+    p <- ggplot(df, aes(x = date)) +
       geom_vline(xintercept = parl_steps$leg_period_start_date,
                  color = "gray70", alpha = 0.5, linewidth = 0.3) +
       geom_text(data = parl_years, aes(x = date, y = y_min, label = year),
@@ -1246,6 +1303,9 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 13) +
       theme(plot.background  = element_rect(fill = "white", color = NA),
             panel.background = element_rect(fill = "white", color = NA))
+
+    last_rese_daily_plot(p)   # kept for attaching to GitHub issues
+    p
   })
 
   output$rese_daily_metrics <- renderUI({
@@ -1420,7 +1480,7 @@ server <- function(input, output, session) {
                          style = "margin-top:6px;")
         )
       },
-      issue_path_tag(path, auto_summary,
+      issue_path_tag(path, auto_summary, plot_key = "rese_daily",
                      table_key = if (nrow(rese_ending) > 0) "overcount")
     )
   })
@@ -1701,6 +1761,17 @@ server <- function(input, output, session) {
     poli_missing = poli_missing_table$snapshot
   )
 
+  # Plot reactiveVals per issue-form plot_key, with the caption used when the
+  # image is appended to the issue body.
+  issue_plot_sources <- list(
+    poli_completeness = last_poli_plot,
+    rese_daily        = last_rese_daily_plot
+  )
+  issue_plot_captions <- c(
+    poli_completeness = "Completeness over time",
+    rese_daily        = "Daily seated MPs vs official parliament size"
+  )
+
   output$poli_missing_header <- renderUI({
     selected_var <- poli_vars()[input$poli_completeness_rows_selected]
     missing <- poli_missing_rows()
@@ -1757,7 +1828,7 @@ server <- function(input, output, session) {
     auto_summary <- build_completeness_summary(selected_var, missing_preview,
                                                completeness_ts)
     path <- issue_path(input$country_select, "POLI", "completeness", selected_var)
-    issue_path_tag(path, auto_summary, has_plot = TRUE,
+    issue_path_tag(path, auto_summary, plot_key = "poli_completeness",
                    table_key = if (nrow(missing) > 0) "poli_missing")
   })
 

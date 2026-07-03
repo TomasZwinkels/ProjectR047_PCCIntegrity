@@ -39,8 +39,12 @@ substrRight <- function(x, n) {
 ###############################################################################
 read_csv_with_excel_sep <- function(file_path, ...) {
   first_line <- readLines(file_path, n = 1, warn = FALSE, encoding = "UTF-8")
+  # Strip a leading UTF-8 BOM before probing for the sep= preamble.
+  first_line <- sub("^\ufeff", "", first_line)
   skip_lines <- if (length(first_line) > 0 && grepl("^sep=.", first_line[1])) 1 else 0
-  utils::read.csv(file_path, skip = skip_lines, ...)
+  # fileEncoding = "UTF-8-BOM" removes the BOM (if any) so the first column
+  # name is not corrupted; harmless when no BOM is present.
+  utils::read.csv(file_path, skip = skip_lines, fileEncoding = "UTF-8-BOM", ...)
 }
 
 ###############################################################################

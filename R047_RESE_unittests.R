@@ -14,6 +14,7 @@ suppressPackageStartupMessages({
 
 # Make sure the functions under test are available
 # (adjust path if your functions live elsewhere)
+source("R047_functions.R")        # format_pcc_date, used by coverage details
 source("R047_RESE_functions.R")
 
 # ------------------------------------------------------------------
@@ -1662,4 +1663,77 @@ test_that("details: snapshot_row has n_seated > 0 on PASS", {
   expect_true(result$check_passed)
   expect_true(result$n_seated > 0)
   expect_equal(nrow(result$snapshot_row), 1L)
+})
+
+test_that("details: boundary stats for a gap BEFORE the checked date", {
+  # Two episodes end on 2001-12-31 (the data boundary), one earlier.
+  rese <- mk_at_date_rese(
+    c("2000-01-01", "2000-01-01", "2000-01-01"),
+    c("2001-12-31", "2001-12-31", "2001-06-30")
+  )
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  expect_false(result$check_passed)
+
+  st <- result$summary_stats
+  expect_equal(unname(st["date checked"]),                         "15jun2002")
+  expect_equal(unname(st["last covered date before"]),             "31dec2001")
+  expect_equal(unname(st["first date with no data"]),              "01jan2002")
+  expect_equal(unname(st["gap length before date (days)"]),        "166")
+  expect_equal(unname(st["episodes ending on last covered date"]), "2")
+  expect_equal(unname(st["next covered date after"]),              "none")
+  expect_equal(unname(st["ongoing episodes (no end date)"]),       "0")
+
+  be <- result$boundary_episodes
+  expect_equal(nrow(be), 2L)
+  expect_true(all(be$boundary_side == "last_end_before_date"))
+})
+
+test_that("details: boundary stats for a gap AFTER the checked date", {
+  # Two episodes start on 2003-01-01 (data resumes there).
+  rese <- mk_at_date_rese(
+    c("2003-01-01", "2003-01-01"),
+    c("2006-12-31", "2006-12-31")
+  )
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  expect_false(result$check_passed)
+
+  st <- result$summary_stats
+  expect_equal(unname(st["last covered date before"]),               "none")
+  expect_equal(unname(st["next covered date after"]),                "01jan2003")
+  expect_equal(unname(st["gap length after date (days)"]),           "200")
+  expect_equal(unname(st["episodes starting on next covered date"]), "2")
+
+  be <- result$boundary_episodes
+  expect_equal(nrow(be), 2L)
+  expect_true(all(be$boundary_side == "first_start_after_date"))
+})
+
+test_that("details: boundaries on both sides are both reported", {
+  rese <- mk_at_date_rese(
+    c("2000-01-01", "2003-01-01"),
+    c("2001-12-31", "2006-12-31")
+  )
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  be <- result$boundary_episodes
+  expect_equal(nrow(be), 2L)
+  expect_setequal(be$boundary_side,
+                  c("last_end_before_date", "first_start_after_date"))
+})
+
+test_that("details: no episodes at all yields empty boundary df and 'none' stats", {
+  rese <- mk_at_date_rese(character(0), character(0))
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2002-06-15"))
+  expect_false(result$check_passed)
+  expect_equal(unname(result$summary_stats["last covered date before"]), "none")
+  expect_equal(unname(result$summary_stats["next covered date after"]),  "none")
+  expect_equal(nrow(result$boundary_episodes), 0L)
+  expect_true("boundary_side" %in% names(result$boundary_episodes))
+})
+
+test_that("details: ongoing episode passes and is counted in the stats", {
+  rese <- mk_at_date_rese(c("2000-01-01", "2000-01-01"),
+                          c(NA,           "2001-12-31"))
+  result <- check_RESE_coverage_at_date_details(rese, as.Date("2020-01-01"))
+  expect_true(result$check_passed)
+  expect_equal(unname(result$summary_stats["ongoing episodes (no end date)"]), "1")
 })

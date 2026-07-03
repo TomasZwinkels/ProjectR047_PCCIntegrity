@@ -1125,12 +1125,29 @@ check_RESE_coverage_at_date <- function(RESE, date) {
 ###############################################################################
 # Function: check_RESE_coverage_at_date_details
 # Description:
-#   Detailed version of check_RESE_coverage_at_date.
+#   Detailed version of check_RESE_coverage_at_date. Besides the pass/fail
+#   verdict it characterizes the data boundary around the checked date, so a
+#   failure report can say WHERE the data stops rather than just that it does:
+#   the last covered date before the checked date, the first date with no data
+#   at all, the gap lengths, and how many episodes end/start exactly at those
+#   boundaries (a full chamber ending on one day is the signature of a data
+#   snapshot cutoff, not of an empty parliament).
 #
 # Returns: List with
-#   - check_passed   (TRUE/FALSE)
-#   - n_seated       number of RESE entries active on that date
-#   - snapshot_row   1-row data.frame with columns date_checked and n_seated
+#   - check_passed      (TRUE/FALSE)
+#   - n_seated          number of RESE entries active on that date
+#   - snapshot_row      1-row data.frame with columns date_checked and n_seated
+#   - summary_stats     named character vector of key facts (PCC-format dates);
+#                       rendered as a "Key facts" block by the dashboard and in
+#                       the GitHub-issue technical details
+#   - boundary_episodes full RESE rows marking the data boundary, with a
+#                       leading boundary_side column: episodes whose end date
+#                       is the last covered date before the checked date
+#                       ("last_end_before_date") and episodes whose start date
+#                       is the next covered date after it
+#                       ("first_start_after_date")
+#
+# Requires: format_pcc_date() from R047_functions.R (sourced by callers).
 ###############################################################################
 check_RESE_coverage_at_date_details <- function(RESE, date) {
   req_cols <- c("res_entry_start_posoxctformat", "res_entry_end_posoxctformat")
@@ -1143,9 +1160,63 @@ check_RESE_coverage_at_date_details <- function(RESE, date) {
 
   n_seated <- sum(rese_start <= date & (is.na(rese_end) | rese_end >= date), na.rm = TRUE)
 
+  # --- Boundary characterization -------------------------------------------
+  # Last covered date on/before the checked date: the latest end date among
+  # episodes that started on/before it. (If any such episode is ongoing, the
+  # check passes and the "gap before" concept does not apply.)
+  ends_before <- rese_end[!is.na(rese_end) & rese_start <= date & rese_end <= date]
+  last_covered_date <- if (length(ends_before) > 0) max(ends_before) else as.Date(NA)
+
+  # Next covered date after the checked date: the earliest start date among
+  # episodes starting after it (relevant for a gap at the START of a range).
+  starts_after <- rese_start[!is.na(rese_start) & rese_start > date]
+  next_covered_date <- if (length(starts_after) > 0) min(starts_after) else as.Date(NA)
+
+  n_ending_on_last   <- if (!is.na(last_covered_date)) {
+    sum(rese_end == last_covered_date, na.rm = TRUE)
+  } else 0L
+  n_starting_on_next <- if (!is.na(next_covered_date)) {
+    sum(rese_start == next_covered_date, na.rm = TRUE)
+  } else 0L
+  n_ongoing <- sum(is.na(rese_end) & !is.na(rese_start))
+
+  fmt_or_na <- function(d) if (is.na(d)) "none" else format_pcc_date(d)
+
+  summary_stats <- c(
+    "date checked"                          = format_pcc_date(date),
+    "MPs seated on that date"               = as.character(n_seated),
+    "last covered date before"              = fmt_or_na(last_covered_date),
+    "first date with no data"               = if (is.na(last_covered_date)) "none"
+                                              else format_pcc_date(last_covered_date + 1),
+    "gap length before date (days)"         = if (is.na(last_covered_date)) "NA"
+                                              else as.character(as.integer(date - last_covered_date)),
+    "episodes ending on last covered date"  = as.character(n_ending_on_last),
+    "next covered date after"               = fmt_or_na(next_covered_date),
+    "gap length after date (days)"          = if (is.na(next_covered_date)) "NA"
+                                              else as.character(as.integer(next_covered_date - date)),
+    "episodes starting on next covered date" = as.character(n_starting_on_next),
+    "ongoing episodes (no end date)"        = as.character(n_ongoing)
+  )
+
+  boundary_last <- if (!is.na(last_covered_date)) {
+    RESE[!is.na(rese_end) & rese_end == last_covered_date, , drop = FALSE]
+  } else RESE[0, , drop = FALSE]
+  boundary_next <- if (!is.na(next_covered_date)) {
+    RESE[!is.na(rese_start) & rese_start == next_covered_date, , drop = FALSE]
+  } else RESE[0, , drop = FALSE]
+
+  boundary_episodes <- rbind(
+    cbind(boundary_side = rep("last_end_before_date",  nrow(boundary_last)),
+          boundary_last,  stringsAsFactors = FALSE),
+    cbind(boundary_side = rep("first_start_after_date", nrow(boundary_next)),
+          boundary_next, stringsAsFactors = FALSE)
+  )
+
   list(
-    check_passed = n_seated > 0,
-    n_seated     = as.integer(n_seated),
-    snapshot_row = data.frame(date_checked = date, n_seated = as.integer(n_seated))
+    check_passed      = n_seated > 0,
+    n_seated          = as.integer(n_seated),
+    snapshot_row      = data.frame(date_checked = date, n_seated = as.integer(n_seated)),
+    summary_stats     = summary_stats,
+    boundary_episodes = boundary_episodes
   )
 }
