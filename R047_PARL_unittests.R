@@ -294,3 +294,92 @@ test_that("parliament_size level parameter requires level column", {
     "PARLLOC is missing 'level' column needed for filtering"
   )
 })
+
+# ------------------------------------------------------------
+# Fluctuating parliament_size: ';'-separated values (issue #20)
+# - is_valid_parliament_size()
+# - parse_parliament_size_series()
+# - check functions accept the ';'-form
+# ------------------------------------------------------------
+
+test_that("is_valid_parliament_size accepts single and ';'-separated positive ints", {
+  expect_true(all(is_valid_parliament_size(c("518", "519;663", "12;13;14;15"))))
+  expect_false(any(is_valid_parliament_size(
+    c("519;abc", "519;0", "0", "", "NA", NA, "5190", "150.5"))))
+})
+
+test_that("check_PARL_parliament_size_meaningful accepts ';'-separated sizes", {
+  df <- mk_parl(c("18Feb1987", "04Nov1980"),
+                c("19Dec1990", "28Mar1983"),
+                parliament_size = c("519;663", "519"))
+  expect_true(check_PARL_parliament_size_meaningful(df))
+})
+
+test_that("check_PARL_parliament_size_meaningful still rejects bad ';'-values", {
+  df <- mk_parl(c("18Feb1987"), c("19Dec1990"), parliament_size = c("519;0"))
+  expect_false(check_PARL_parliament_size_meaningful(df))
+
+  df2 <- mk_parl(c("18Feb1987"), c("19Dec1990"), parliament_size = c("519;abc"))
+  expect_false(check_PARL_parliament_size_meaningful(df2))
+})
+
+test_that("details classifies a bad ';'-value and keeps old single-value buckets", {
+  df <- mk_parl(c("01Jan2020", "15Feb2021", "01Mar2021", "01Apr2021", "01May2021"),
+                c("31Dec2020", "28Feb2021", "31Mar2021", "30Apr2021", "31May2021"),
+                parliament_size = c("519;663", NA, "INVALID", 0, 150.5))
+  result <- check_PARL_parliament_size_meaningful_details(df)
+  expect_false(result$check_passed)
+  expect_equal(result$na_count, 1)            # row 2
+  expect_equal(result$non_numeric_count, 1)   # row 3 "INVALID"
+  expect_equal(result$non_positive_count, 1)  # row 4 = 0
+  expect_equal(result$non_integer_count, 1)   # row 5 = 150.5
+  expect_false(1 %in% result$problem_rows)    # row 1 "519;663" is valid
+})
+
+test_that("parse_parliament_size_series returns one row for a single value", {
+  res <- parse_parliament_size_series("DE_NT-BT_1980",
+           as.Date("1980-11-04"), as.Date("1983-03-28"), "519")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$size, 519L)
+  expect_equal(res$seg_start, as.Date("1980-11-04"))
+  expect_equal(res$seg_end,   as.Date("1983-03-28"))
+})
+
+test_that("parse_parliament_size_series splits at the registered changeover date", {
+  res <- parse_parliament_size_series("DE_NT-BT_1987",
+           as.Date("1987-02-18"), as.Date("1990-12-19"), "519;663")
+  expect_equal(nrow(res), 2)
+  expect_equal(res$size, c(519L, 663L))
+  # midnight rule: first segment ends the day before the changeover
+  expect_equal(res$seg_end[1],   as.Date("1990-10-02"))
+  expect_equal(res$seg_start[2], as.Date("1990-10-03"))
+})
+
+test_that("parse_parliament_size_series stops when a changeover date is missing", {
+  expect_error(
+    parse_parliament_size_series("DE_NT-BT_9999",
+      as.Date("1987-02-18"), as.Date("1990-12-19"), "519;663"),
+    "changes mid-term"
+  )
+})
+
+test_that("parse_parliament_size_series validates date count/order/range", {
+  reg_wrong_count <- list("P" = as.Date(c("1990-10-03")))
+  expect_error(
+    parse_parliament_size_series("P", as.Date("1987-01-01"), as.Date("1990-12-31"),
+      "1;2;3", registry = reg_wrong_count),
+    "changes mid-term"                     # needs 2 dates, given 1
+  )
+  reg_out_of_range <- list("P" = as.Date("1999-01-01"))
+  expect_error(
+    parse_parliament_size_series("P", as.Date("1987-01-01"), as.Date("1990-12-31"),
+      "519;663", registry = reg_out_of_range),
+    "must lie within"
+  )
+  reg_unsorted <- list("P" = as.Date(c("1990-10-03", "1989-01-01")))
+  expect_error(
+    parse_parliament_size_series("P", as.Date("1987-01-01"), as.Date("1990-12-31"),
+      "1;2;3", registry = reg_unsorted),
+    "strictly increasing"
+  )
+})

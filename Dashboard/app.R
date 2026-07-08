@@ -65,7 +65,7 @@ build_cohort <- function(country_code) {
   rese <- RESE |>
     filter(
       country_abb == country_code,
-      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11")
     )
 
   parl <- PARL |>
@@ -87,10 +87,14 @@ build_cohort <- function(country_code) {
 
     if (nrow(seated) == 0) return(NULL)
 
+    # snapshot is at term start, so the first (';'-separated) size segment applies
+    first_size <- as.numeric(
+      strsplit(as.character(parl$parliament_size[i]), ";", fixed = TRUE)[[1]][1])
+
     data.frame(
       parliament_id   = parl$parliament_id[i],
       snapshot_day    = snapshot_day,
-      parliament_size = as.numeric(parl$parliament_size[i]),
+      parliament_size = first_size,
       pers_id         = unique(seated$pers_id),
       stringsAsFactors = FALSE
     )
@@ -105,7 +109,7 @@ cache_dir <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/cache"
 build_daily_counts <- function(cc) {
   rese_cc <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
   parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
                     PARL$assembly_abb == assembly_map[[cc]], ]
   parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
@@ -127,9 +131,22 @@ build_daily_counts <- function(cc) {
     sum(rese_start <= d & (is.na(rese_end) | rese_end >= d), na.rm = TRUE)
   }, integer(1))
 
-  idx <- findInterval(as.numeric(date_seq), as.numeric(parl_cc$leg_period_start_date))
-  parliament_size <- ifelse(idx == 0L, NA_integer_,
-                            as.integer(parl_cc$parliament_size[idx]))
+  # Build the daily parliament_size, honouring ';'-separated fluctuating sizes
+  # (e.g. DE_NT-BT_1987 "519;663") by expanding each term into sub-periods at
+  # its manually-registered changeover date(s). parse_parliament_size_series()
+  # stops with an actionable error if a required changeover date is missing.
+  parliament_size <- rep(NA_integer_, length(date_seq))
+  for (i in seq_len(nrow(parl_cc))) {
+    ls <- parl_cc$leg_period_start_date[i]
+    le <- parl_cc$leg_period_end_date[i]
+    if (is.na(ls) || is.na(le)) next
+    segs <- parse_parliament_size_series(
+      parl_cc$parliament_id[i], ls, le, parl_cc$parliament_size[i])
+    for (s in seq_len(nrow(segs))) {
+      in_seg <- date_seq >= segs$seg_start[s] & date_seq <= segs$seg_end[s]
+      parliament_size[in_seg] <- segs$size[s]
+    }
+  }
 
   data.frame(date = date_seq, n_seated = n_seated,
              parliament_size = parliament_size)
@@ -177,7 +194,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
     RESE[RESE$country_abb == cc, ]
   ))
   rese_mp <- rese_mp[rese_mp$political_function %in%
-                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
+                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
 
   labels <- c(
     "All RESE person IDs exist in POLI",
@@ -458,7 +475,7 @@ run_meme_checks <- function(cc, date_from, date_to) {
   ))
   rese_mp <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
   # For check #7 (party coverage): only MPs active within the date range
   rese_mp_in_range <- rese_mp[
     rese_mp$start_date <= date_to &
@@ -1441,7 +1458,7 @@ server <- function(input, output, session) {
     cc <- info$country
     RESE[RESE$country_abb == cc &
            RESE$political_function %in%
-             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
+             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11") &
            !is.na(RESE$end_date) &
            RESE$end_date == ep$end_date, ]
   })
@@ -1636,7 +1653,7 @@ server <- function(input, output, session) {
     RESE |>
       filter(
         country_abb == input$country_select,
-        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11")
       ) |>
       pull(pers_id) |>
       unique()

@@ -676,3 +676,54 @@ test_that("POLI check id / detail-key vectors stay index-aligned", {
   expect_equal(length(poli_check_ids), length(poli_check_detail_keys))
   expect_true(all(poli_check_ids %in% names(detail_default_cols_map$POLI)))
 })
+
+# ------------------------------------------------------------
+# Fluctuating parliament_size in the daily seated-vs-size series (issue #20).
+# build_daily_counts() lives in app.R (Shiny globals) so is not sourced here;
+# these tests exercise the exact sub-period -> per-day size mapping it now uses,
+# via parse_parliament_size_series() from R047_PARL_functions.R.
+# ------------------------------------------------------------
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
+
+# Faithful copy of the inner loop of build_daily_counts(): map each day in
+# date_seq to the size of the sub-period it falls in.
+daily_size_for <- function(parl_cc, date_seq) {
+  out <- rep(NA_integer_, length(date_seq))
+  for (i in seq_len(nrow(parl_cc))) {
+    segs <- parse_parliament_size_series(
+      parl_cc$parliament_id[i], parl_cc$leg_start[i], parl_cc$leg_end[i],
+      parl_cc$parliament_size[i])
+    for (s in seq_len(nrow(segs))) {
+      in_seg <- date_seq >= segs$seg_start[s] & date_seq <= segs$seg_end[s]
+      out[in_seg] <- segs$size[s]
+    }
+  }
+  out
+}
+
+test_that("daily size steps 519 -> 663 across the registered changeover date", {
+  parl_cc <- data.frame(
+    parliament_id   = "DE_NT-BT_1987",
+    leg_start       = as.Date("1987-02-18"),
+    leg_end         = as.Date("1990-12-19"),
+    parliament_size = "519;663",
+    stringsAsFactors = FALSE
+  )
+  days <- as.Date(c("1990-10-01", "1990-10-02", "1990-10-03", "1990-12-19"))
+  sizes <- daily_size_for(parl_cc, days)
+  expect_equal(sizes, c(519L, 519L, 663L, 663L))
+})
+
+test_that("daily size build stops when a fluctuating term lacks its changeover date", {
+  parl_cc <- data.frame(
+    parliament_id   = "DE_NT-BT_UNREGISTERED",
+    leg_start       = as.Date("1987-02-18"),
+    leg_end         = as.Date("1990-12-19"),
+    parliament_size = "519;663",
+    stringsAsFactors = FALSE
+  )
+  expect_error(
+    daily_size_for(parl_cc, as.Date(c("1990-10-01", "1990-10-03"))),
+    "changes mid-term"
+  )
+})
