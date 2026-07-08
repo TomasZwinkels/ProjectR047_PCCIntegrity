@@ -196,7 +196,7 @@ check_MEME_parlmembers_have_party <- function(RESE, MEME) {
   if (!"pers_id" %in% names(MEME)) stop("MEME is missing column pers_id")
 
   parl_persons <- unique(RESE$pers_id[
-    RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+    RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11")
   ])
 
   if (length(parl_persons) == 0) return(TRUE)
@@ -393,7 +393,7 @@ check_MEME_parlmembers_have_party_details <- function(RESE, MEME) {
   if (!"political_function" %in% names(RESE)) stop("RESE is missing column political_function")
   if (!"pers_id" %in% names(MEME)) stop("MEME is missing column pers_id")
 
-  parl_rows <- RESE[RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), , drop = FALSE]
+  parl_rows <- RESE[RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), , drop = FALSE]
   parl_persons <- unique(parl_rows$pers_id)
 
   if (length(parl_persons) == 0) {
