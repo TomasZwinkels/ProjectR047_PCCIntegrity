@@ -70,7 +70,7 @@ meme_check_ids <- c(
   "diff_party_overlap_during_parliament"
 )
 
-poli_check_ids <- c("persid_unique")
+poli_check_ids <- c("persid_unique", "birthdate_jan01_excess")
 
 # --- Curated column views for the problem-row tables ---
 
@@ -145,7 +145,8 @@ detail_default_cols_map <- list(
   ),
   POLI = list(
     # id_<cc>_* columns are appended automatically for frame == "POLI"
-    persid_unique = c("pers_id", "last_name", "first_name", "birth_date", "wikidata_id")
+    persid_unique          = c("pers_id", "last_name", "first_name", "birth_date", "wikidata_id"),
+    birthdate_jan01_excess = c("pers_id", "last_name", "first_name", "birth_date")
   )
 )
 

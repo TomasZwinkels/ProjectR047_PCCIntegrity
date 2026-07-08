@@ -502,10 +502,12 @@ meme_detail_keys <- c(
 run_poli_checks <- function(cc) {
   poli_cc <- POLI[POLI$country == cc, ]
   labels <- c(
-    "All POLI person IDs are unique"
+    "All POLI person IDs are unique",
+    "POLI birth dates not over-concentrated on 01-Jan"
   )
   details <- list(
-    check_POLI_persid_unique_details(poli_cc)
+    check_POLI_persid_unique_details(poli_cc),
+    check_POLI_birthdate_jan01_excess_details(poli_cc)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -513,7 +515,7 @@ run_poli_checks <- function(cc) {
   )
 }
 
-poli_check_detail_keys <- c("duplicate_rows")
+poli_check_detail_keys <- c("duplicate_rows", "jan01_rows")
 
 checks_dt <- function(df) {
   DT::datatable(

@@ -94,6 +94,11 @@ cat("--- POLI Checks ---\n")
 poli_persid_unique_check <- check_POLI_persid_unique(POLI)
 cat("All POLI person IDs are unique:", ifelse(poli_persid_unique_check, "✅ PASS", "❌ FAIL"), "\n")
 
+# Advisory / non-blocking: a FAIL here reports an anomaly for investigation but
+# does NOT stop the pipeline (consistent with all R047 checks).
+poli_jan01_check <- check_POLI_birthdate_jan01_excess(POLI)
+cat("POLI birth dates not over-concentrated on 01-Jan:", ifelse(poli_jan01_check, "✅ PASS", "❌ FAIL"), "\n")
+
 # --- RESE Checks ---
 cat("\n--- RESE Checks ---\n")
 
@@ -205,7 +210,7 @@ if (!coverage_dateto_check) {
 
 cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 
-all_checks <- c(poli_persid_unique_check,
+all_checks <- c(poli_persid_unique_check, poli_jan01_check,
                 person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
                 meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
                 birthdate_dup_check, parlmem_coverage_check, coverage_datefrom_check, coverage_dateto_check)
