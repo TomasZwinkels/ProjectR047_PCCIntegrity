@@ -9,12 +9,14 @@ source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_functions.R")
 source("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_functions.R")
+source("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_quality_goals.R")
 
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_RESE_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_PARL_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_MEME_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/R047_POLI_unittests.R")
 test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_unittests.R")
+test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_quality_goals_unittests.R")
 # test_file("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_slow_unittests.R") # Calls external services (Codex LLM, GitHub API), so is slow, so commented out by default.
 
 # Load data once at startup
@@ -699,6 +701,15 @@ ui <- fluidPage(
     )
   ),
   tabsetPanel(id = "main_tabs", selected = saved$tab,
+    tabPanel("Quality goals",
+      fluidRow(
+        column(10, tags$small(style = "color:#666; margin-top:8px; display:block;",
+          "Project scorecard: each goal evaluated per country over the project's envisioned period (independent of the date filter above).")),
+        column(2, actionButton("recompute_goals", "Recompute", class = "btn-sm btn-default",
+                               style = "float:right; margin-top:4px;"))
+      ),
+      uiOutput("quality_goals_table")
+    ),
     tabPanel("RESE_MP",
       DT::dataTableOutput("rese_checks"),
       tags$small(style = "color:#666; margin-top:4px; display:block;",
@@ -1299,6 +1310,65 @@ server <- function(input, output, session) {
                  value = 0.5, {
       get_daily_counts(cc)
     })
+  })
+
+  # --- Quality goals scorecard (computed lazily when the tab is opened) ---
+  goals_cache_version <- reactiveVal(0)
+
+  observeEvent(input$recompute_goals, {
+    goals_cache_version(goals_cache_version() + 1)
+  })
+
+  goals_matrix <- reactive({
+    goals_cache_version()
+    ps <- quality_goals_project$period_start
+    pe <- quality_goals_project$period_end
+    # One hard-integrity-checks evaluator per dataframe, matching the runners
+    # behind the RESE_MP/PARL/MEME/POLI tabs. Keyed by df so evaluate_goal()
+    # can dispatch on each goal's $df.
+    base_checks <- list(
+      POLI = function(cc) run_poli_checks(cc),
+      PARL = function(cc) run_parl_checks(cc),
+      MEME = function(cc) run_meme_checks(cc, ps, pe),
+      RESE = function(cc) run_rese_checks(cc, ps, pe)
+    )
+    ctx <- list(
+      POLI = POLI, RESE = RESE, PARL = PARL,
+      mp_codes = c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
+                   "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"),
+      period_start = ps,
+      period_end   = pe,
+      assembly_map = assembly_map,
+      build_cohort_fn = build_cohort,
+      daily_counts_fn = get_daily_counts,
+      checks_fns = base_checks
+    )
+    withProgress(message = "Evaluating quality goals for all countries...",
+                 value = 0, {
+      # Progress is driven by the check runners (the dominant cost): each of the
+      # `checks_pass` goals calls one runner per country.
+      n_check_goals <- sum(vapply(quality_goals,
+                                  function(g) g$metric == "checks_pass", logical(1)))
+      n_calls <- length(all_countries) * n_check_goals
+      done <- new.env(); done$k <- 0
+      ctx$checks_fns <- lapply(names(base_checks), function(df) {
+        force(df)
+        function(cc) {
+          res <- base_checks[[df]](cc)
+          done$k <- done$k + 1
+          setProgress(value = done$k / n_calls,
+                      detail = paste0(df, " · ", country_labels[[cc]]))
+          res
+        }
+      })
+      names(ctx$checks_fns) <- names(base_checks)
+      build_goals_matrix(quality_goals, all_countries, ctx)
+    })
+  })
+
+  output$quality_goals_table <- renderUI({
+    render_goals_table(quality_goals_project, quality_goals, goals_matrix(),
+                       all_countries, country_labels)
   })
 
   output$rese_daily_plot <- renderPlot({
