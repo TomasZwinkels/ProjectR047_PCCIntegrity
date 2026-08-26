@@ -53,7 +53,7 @@ saved <- if (file.exists(defaults_file)) {
        date_to = as.Date("2025-12-31"), tab = "RESE_MP")
 }
 
-poli_base_vars <- c("last_name", "first_name", "birth_date", "death_date", "birth_place_raw", "wikidata_id")
+poli_base_vars <- c("last_name", "first_name", "gender", "birth_date", "death_date", "birth_place_raw", "wikidata_id")
 
 country_labels <- c(
   CA = "Canada", CH = "Switzerland", DE = "Germany",
@@ -522,11 +522,13 @@ run_poli_checks <- function(cc) {
   poli_cc <- POLI[POLI$country == cc, ]
   labels <- c(
     "All POLI person IDs are unique",
-    "POLI birth dates not over-concentrated on 01-Jan"
+    "POLI birth dates not over-concentrated on 01-Jan",
+    "All gender values are codebook-valid (m/f/nb/tm/tf)"
   )
   details <- list(
     check_POLI_persid_unique_details(poli_cc),
-    check_POLI_birthdate_jan01_excess_details(poli_cc)
+    check_POLI_birthdate_jan01_excess_details(poli_cc),
+    check_POLI_gender_valid_details(poli_cc)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -534,7 +536,7 @@ run_poli_checks <- function(cc) {
   )
 }
 
-poli_check_detail_keys <- c("duplicate_rows", "jan01_rows")
+poli_check_detail_keys <- c("duplicate_rows", "jan01_rows", "invalid_rows")
 
 checks_dt <- function(df) {
   DT::datatable(

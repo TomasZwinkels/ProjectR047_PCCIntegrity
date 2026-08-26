@@ -81,3 +81,51 @@ check_POLI_birthdate_jan01_excess_details <- function(POLI, mult = 3, min_count 
     )
   )
 }
+
+# -----------------------------------------------------------------------------
+# Check: all non-empty gender values are codebook-valid
+#
+# The PCC codebook (variable `gender`) defines the permitted values as:
+#   m  = male
+#   f  = female
+#   nb = non-binary
+#   tm = trans male
+#   tf = trans female
+# Anything else (e.g. name fragments that bled into the column, stray casing,
+# free-text) is a coding error. Missing values (NA / "") are NOT flagged here —
+# gender availability is a separate completeness concern; this check only
+# validates the values that ARE present.
+# -----------------------------------------------------------------------------
+
+POLI_gender_valid_codes <- c("m", "f", "nb", "tm", "tf")
+
+check_POLI_gender_valid <- function(POLI) {
+  check_POLI_gender_valid_details(POLI)$check_passed
+}
+
+check_POLI_gender_valid_details <- function(POLI) {
+  if (!"gender" %in% names(POLI)) stop("POLI is missing column gender")
+
+  g       <- as.character(POLI$gender)
+  present <- !is.na(g) & trimws(g) != ""
+  # Exact match against the codebook set (case- and whitespace-sensitive: a
+  # value like "M" or " m" is itself a coding error worth surfacing).
+  is_valid <- g %in% POLI_gender_valid_codes
+  is_bad   <- present & !is_valid
+
+  bad_rows <- POLI[is_bad, , drop = FALSE]
+  bad_vals <- sort(table(g[is_bad]), decreasing = TRUE)
+
+  list(
+    check_passed  = !any(is_bad),
+    invalid_rows  = bad_rows,
+    invalid_count = sum(is_bad),
+    summary_stats = c(
+      "Rows with a gender value" = sum(present),
+      "Codebook-valid values"    = sum(present & is_valid),
+      "Invalid values"           = sum(is_bad),
+      "Distinct invalid codes"   = length(bad_vals),
+      "Permitted codes"          = paste(POLI_gender_valid_codes, collapse = ", ")
+    )
+  )
+}

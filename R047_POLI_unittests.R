@@ -144,3 +144,61 @@ test_that("details PASS with NA ratio when there are no full dates", {
   expect_equal(result$jan01_count, 0)
   expect_true(is.na(result$ratio))
 })
+
+# =============================================================================
+# check_POLI_gender_valid
+# =============================================================================
+
+test_that("PASSes when all present gender values are codebook-valid", {
+  POLI <- data.frame(pers_id = paste0("P", 1:5),
+                     gender = c("m", "f", "nb", "tm", "tf"),
+                     stringsAsFactors = FALSE)
+  expect_true(check_POLI_gender_valid(POLI))
+})
+
+test_that("PASSes when gender is missing (NA/empty are not violations)", {
+  POLI <- data.frame(pers_id = c("A", "B", "C"),
+                     gender = c("m", "", NA), stringsAsFactors = FALSE)
+  expect_true(check_POLI_gender_valid(POLI))
+})
+
+test_that("FAILs on out-of-codebook values (name fragments, wrong casing)", {
+  POLI <- data.frame(pers_id = c("A", "B", "C", "D"),
+                     gender = c("m", "Wollenberger", "von", "M"),
+                     stringsAsFactors = FALSE)
+  expect_false(check_POLI_gender_valid(POLI))
+})
+
+test_that("errors when gender column is missing", {
+  POLI <- data.frame(pers_id = "A", stringsAsFactors = FALSE)
+  expect_error(check_POLI_gender_valid(POLI), "missing column gender")
+})
+
+# =============================================================================
+# check_POLI_gender_valid_details
+# =============================================================================
+
+test_that("details return the invalid rows and exclude missing values", {
+  POLI <- data.frame(
+    pers_id = paste0("P", 1:6),
+    gender  = c("m", "f", "nb", "tf_bad", "", NA),
+    stringsAsFactors = FALSE)
+  result <- check_POLI_gender_valid_details(POLI)
+
+  expect_false(result$check_passed)
+  expect_equal(result$invalid_count, 1)
+  expect_equal(nrow(result$invalid_rows), 1)
+  expect_equal(result$invalid_rows$gender, "tf_bad")
+  expect_equal(unname(result$summary_stats["Rows with a gender value"]), "4")
+  expect_equal(unname(result$summary_stats["Invalid values"]), "1")
+})
+
+test_that("details PASS with zero invalid rows on a clean frame", {
+  POLI <- data.frame(pers_id = c("A", "B"),
+                     gender = c("m", "f"), stringsAsFactors = FALSE)
+  result <- check_POLI_gender_valid_details(POLI)
+
+  expect_true(result$check_passed)
+  expect_equal(result$invalid_count, 0)
+  expect_equal(nrow(result$invalid_rows), 0)
+})

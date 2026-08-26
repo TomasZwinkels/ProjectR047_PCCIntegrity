@@ -37,6 +37,7 @@ goal <- function(id, df, label, metric, scope, target, var = NA_character_) {
 quality_goals <- list(
   goal("poli_last",  "POLI", "Last name available (MPs)",   "avail",      "mps_overall",    100,  var = "last_name"),
   goal("poli_first", "POLI", "First name available (MPs)",  "avail",      "mps_overall",    100,  var = "first_name"),
+  goal("poli_gen",   "POLI", "Gender available (MPs)",      "avail",      "per_parliament", 97.5, var = "gender"),
   goal("poli_dob",   "POLI", "Birth year available (MPs)",  "avail_year", "per_parliament", 97.5, var = "birth_date"),
   goal("poli_bpl",   "POLI", "Birth place available (MPs)", "avail",      "per_parliament", 97.5, var = "birth_place_raw"),
   goal("poli_hard",  "POLI", "POLI hard integrity checks pass", "checks_pass",     "country", NA),
