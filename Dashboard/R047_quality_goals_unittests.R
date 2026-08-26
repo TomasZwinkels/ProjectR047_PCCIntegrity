@@ -200,6 +200,165 @@ test_that("overcount_free passes at >=99.5% overcount-free days", {
   expect_false(res$pass)
 })
 
+# --- undercount_structural: helpers -----------------------------------------
+
+# Daily-counts frame from a relative-deficit vector (one value per day).
+mk_daily <- function(start, rel, size = 100L) {
+  data.frame(
+    date            = seq(as.Date(start), by = "day", length.out = length(rel)),
+    n_seated        = as.integer(round(size * (1 - rel))),
+    parliament_size = size)
+}
+
+mk_parl <- function(ids, starts, ends) {
+  data.frame(
+    country_abb = "XX", level = "NT", assembly_abb = "AA",
+    parliament_id = ids,
+    leg_period_start_date = as.Date(starts),
+    leg_period_end_date   = as.Date(ends),
+    stringsAsFactors = FALSE)
+}
+
+# Full pipeline over synthetic daily counts; returns undercount_flag_legislatures().
+uc_run <- function(dc, parl, coverage_end = as.Date(NA)) {
+  daily <- undercount_daily(dc, coverage_end)
+  stats <- undercount_legislature_stats(daily, parl, coverage_end)
+  undercount_flag_legislatures(stats, median(daily$rel_deficit))
+}
+
+# --- undercount_coverage_end (vintage guard boundary) ---
+
+test_that("coverage end is the last end date only when no membership is open", {
+  rese <- data.frame(end_date = as.Date(c("2000-06-30", "1998-01-01")))
+  expect_equal(undercount_coverage_end(rese), as.Date("2000-06-30"))
+  rese$end_date[1] <- NA   # an open-ended sitting MP -> coverage runs to today
+  expect_true(is.na(undercount_coverage_end(rese)))
+  expect_true(is.na(undercount_coverage_end(rese[0, , drop = FALSE])))
+})
+
+# --- frictional vacancy never flags; deep chronic deficit always does ---
+
+test_that("frictional floor and the self-masking cap both hold", {
+  parl <- mk_parl("P1", "2000-01-01", "2000-12-31")
+
+  # Constant 1-seat-in-100 vacancy: classic by-election friction -> clean.
+  fl <- uc_run(mk_daily("2000-01-01", rep(0.01, 366)), parl)
+  expect_false(any(fl$stats$flagged))
+
+  # Uniform 3%: baseline self-masks (thr rises to the 5% cap) -> still clean.
+  fl <- uc_run(mk_daily("2000-01-01", rep(0.03, 366)), parl)
+  expect_false(any(fl$stats$flagged))
+
+  # Uniform 6%: above the absolute cap -> flags even though the whole
+  # country's baseline is equally bad (broken data can't excuse itself).
+  fl <- uc_run(mk_daily("2000-01-01", rep(0.06, 366)), parl)
+  expect_true(fl$stats$flagged)
+  expect_equal(fl$stats$severity, "structural")
+})
+
+# --- baseline adaptivity: flag only the legislature worse than its country ---
+
+test_that("chronic flag is relative to the country's own vacancy baseline", {
+  parl <- mk_parl(c("P1", "P2", "P3"),
+                  c("2000-01-01", "2001-01-01", "2002-01-01"),
+                  c("2000-12-31", "2001-12-31", "2002-12-31"))
+  dc <- rbind(mk_daily("2000-01-01", rep(0.020, 366), size = 1000L),
+              mk_daily("2001-01-01", rep(0.020, 365), size = 1000L),
+              mk_daily("2002-01-01", rep(0.045, 365), size = 1000L))
+  fl <- uc_run(dc, parl)
+  # Baseline 2% -> threshold 4%: the 2% legislatures are that country's
+  # normal, the 4.5% one is structurally undercounted.
+  expect_equal(fl$baseline, 0.02)
+  expect_equal(fl$stats$flagged, c(FALSE, FALSE, TRUE))
+  expect_equal(fl$stats$severity[3], "structural")
+})
+
+# --- acute statistic: a localized gap in an otherwise healthy legislature ---
+
+test_that("worst-90-day window catches localized gaps the median misses", {
+  parl <- mk_parl("P1", "2000-01-01", "2000-12-31")
+
+  # 100 days at 15% missing, rest full: median is 0, acute is ~15% -> flag.
+  fl <- uc_run(mk_daily("2000-01-01", c(rep(0.15, 100), rep(0, 266))), parl)
+  expect_true(fl$stats$flagged)
+  expect_equal(fl$stats$chronic, 0)
+  expect_equal(fl$stats$acute, 0.15)
+  # The worst window is located (first 90-day window inside the gap).
+  expect_equal(fl$stats$acute_start, as.Date("2000-01-01"))
+  expect_equal(fl$stats$acute_end,   as.Date("2000-03-30"))
+
+  # A 30-day blip at 15% dilutes to exactly the 5% acute floor -> clean.
+  fl <- uc_run(mk_daily("2000-01-01", c(rep(0.15, 30), rep(0, 336))), parl)
+  expect_false(fl$stats$flagged)
+})
+
+# --- coverage cliff severity ---
+
+test_that("a sustained >=50% deficit is labelled a coverage cliff", {
+  parl <- mk_parl("P1", "2000-01-01", "2000-12-31")
+  fl <- uc_run(mk_daily("2000-01-01", c(rep(1.0, 20), rep(0, 346))), parl)
+  expect_true(fl$stats$flagged)
+  expect_equal(fl$stats$severity, "coverage cliff")
+})
+
+# --- vintage guard: post-coverage days are scrape vintage, not undercount ---
+
+test_that("days after the coverage end are excluded and marked truncated", {
+  parl <- mk_parl("P1", "2000-01-01", "2000-12-31")
+  # Everyone seated through June, nobody after (all memberships closed).
+  dc <- mk_daily("2000-01-01", c(rep(0, 182), rep(1.0, 184)))
+
+  # Without the guard this reads as a catastrophic undercount...
+  fl <- uc_run(dc, parl)
+  expect_true(fl$stats$flagged)
+
+  # ...with it, the post-vintage days vanish and the legislature is clean.
+  fl <- uc_run(dc, parl, coverage_end = as.Date("2000-06-30"))
+  expect_false(fl$stats$flagged)
+  expect_true(fl$stats$truncated)
+  expect_equal(fl$stats$n_days, 182)
+})
+
+# --- legislatures with too few covered days are not scored ---
+
+test_that("min_days keeps sliver legislatures out of the denominator", {
+  parl <- mk_parl(c("P1", "P2"),
+                  c("2000-01-01", "2001-01-01"),
+                  c("2000-12-31", "2001-12-31"))
+  # Daily data covers all of P1 but only 10 days of P2.
+  dc <- mk_daily("2000-01-01", rep(0, 376))
+  stats <- undercount_legislature_stats(undercount_daily(dc), parl)
+  expect_equal(stats$evaluated, c(TRUE, FALSE))
+})
+
+# --- undercount_structural evaluator end-to-end ---
+
+test_that("undercount_structural reports flagged/evaluated with tooltip detail", {
+  PARL <- mk_parl(c("P1", "P2"),
+                  c("2000-01-01", "2001-01-01"),
+                  c("2000-12-31", "2001-12-31"))
+  RESE <- data.frame(
+    pers_id = "XX_A_1", country_abb = "XX", political_function = MP,
+    start_date = as.Date("2000-01-01"), end_date = as.Date(NA),
+    stringsAsFactors = FALSE)
+  dc <- rbind(mk_daily("2000-01-01", rep(0, 366)),
+              mk_daily("2001-01-01", rep(0.10, 365)))
+  ctx <- make_ctx(RESE = RESE, PARL = PARL, daily_counts_fn = function(cc) dc)
+  g <- goal("g", "RESE", "under", "undercount_structural", "country", NA)
+
+  res <- evaluate_goal(g, "XX", ctx)
+  expect_false(res$pass)
+  expect_equal(res$value, 1)
+  expect_equal(res$display, "1/2 parl")
+  expect_match(res$tooltip, "P2 \\(chronic 10\\.0%")
+  expect_match(res$tooltip, "structural")
+
+  # No daily counts at all -> n/a.
+  ctx0 <- make_ctx(RESE = RESE, PARL = PARL,
+                   daily_counts_fn = function(cc) NULL)
+  expect_true(evaluate_goal(g, "XX", ctx0)$na)
+})
+
 # --- build_goals_matrix shape ---
 
 test_that("build_goals_matrix returns one row per goal and one cell per country", {

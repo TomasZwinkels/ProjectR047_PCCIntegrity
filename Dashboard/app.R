@@ -725,7 +725,10 @@ ui <- fluidPage(
       ),
       uiOutput("rese_daily_metrics"),
       plotOutput("rese_daily_plot", height = "700px", click = "daily_plot_click"),
-      uiOutput("overcount_detail")
+      uiOutput("overcount_detail"),
+      tags$hr(),
+      uiOutput("undercount_flagged"),
+      uiOutput("undercount_leg_detail")
     ),
     tabPanel("PARL",
       DT::dataTableOutput("parl_checks"),
@@ -1314,6 +1317,25 @@ server <- function(input, output, session) {
     })
   })
 
+  # Structural-undercount detection for the selected country (RESE_MP tab).
+  # Same pure machinery as the quality-goals scorecard (R047_quality_goals.R),
+  # but over the FULL daily series — detection must not depend on the view's
+  # date filter. Returns the flag result plus the guarded daily series.
+  undercount_flags <- reactive({
+    dc <- daily_counts()
+    req(nrow(dc) > 0)
+    cc <- input$country_select
+    coverage_end <- undercount_coverage_end(rese_mp_rows(RESE, cc))
+    daily <- undercount_daily(dc, coverage_end)
+    if (nrow(daily) == 0) return(NULL)
+    parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
+                      PARL$assembly_abb == assembly_map[[cc]], , drop = FALSE]
+    stats <- undercount_legislature_stats(daily, parl_cc, coverage_end)
+    if (is.null(stats)) return(NULL)
+    fl <- undercount_flag_legislatures(stats, median(daily$rel_deficit))
+    c(fl, list(daily = daily, coverage_end = coverage_end))
+  })
+
   # --- Quality goals scorecard (computed lazily when the tab is opened) ---
   goals_cache_version <- reactiveVal(0)
 
@@ -1410,7 +1432,26 @@ server <- function(input, output, session) {
       df <- df[order(df$date, df$segment), ]
     }
 
+    # Shade structurally undercounted legislatures (see undercount_flags) so
+    # they are visible even though no single day looks alarming.
+    uf <- undercount_flags()
+    bands <- NULL
+    if (!is.null(uf)) {
+      fs <- uf$stats[uf$stats$flagged &
+                       uf$stats$leg_end >= input$date_range[1] &
+                       uf$stats$leg_start <= input$date_range[2], , drop = FALSE]
+      if (nrow(fs) > 0) {
+        bands <- data.frame(
+          xmin = pmax(fs$leg_start, input$date_range[1]),
+          xmax = pmin(fs$leg_end, input$date_range[2]))
+      }
+    }
+
     p <- ggplot(df, aes(x = date)) +
+      { if (!is.null(bands))
+          geom_rect(data = bands,
+                    aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+                    fill = "#e67e22", alpha = 0.12, inherit.aes = FALSE) } +
       geom_vline(xintercept = parl_steps$leg_period_start_date,
                  color = "gray70", alpha = 0.5, linewidth = 0.3) +
       geom_text(data = parl_years, aes(x = date, y = y_min, label = year),
@@ -1427,7 +1468,8 @@ server <- function(input, output, session) {
       scale_y_continuous(name = "MPs (count)") +
       labs(
         title    = paste0("Daily seated MPs \u2014 ", country_name),
-        subtitle = "Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)   Red: overcount"
+        subtitle = paste0("Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)   Red: overcount",
+                          if (!is.null(bands)) "   Orange band: structurally undercounted legislature" else "")
       ) +
       theme_minimal(base_size = 13) +
       theme(plot.background  = element_rect(fill = "white", color = NA),
@@ -1448,6 +1490,27 @@ server <- function(input, output, session) {
     pct_over  <- round(100 * sum(df$n_seated > df$parliament_size) / n_total, 1)
     pct_under <- round(100 * sum(df$n_seated < df$parliament_size) / n_total, 1)
 
+    # Detection is full-series, but the display is scoped to the visible date
+    # range so this count agrees with the plot bands and the over/undercount
+    # percentages on this same line. Flagged legislatures outside the range are
+    # surfaced as a "+N" so the full-series signal is not hidden.
+    uf <- undercount_flags()
+    struct_span <- if (!is.null(uf)) {
+      st <- uf$stats[uf$stats$evaluated, , drop = FALSE]
+      in_win <- st$leg_end >= input$date_range[1] &
+                st$leg_start <= input$date_range[2]
+      st_win    <- st[in_win, , drop = FALSE]
+      n_flag    <- sum(st_win$flagged)
+      n_outside <- sum(st$flagged) - n_flag
+      tagList(" | ", tags$span(
+        style = paste0("color:", if (n_flag > 0) "#e67e22" else "#28a745",
+                       "; font-weight:bold;"),
+        paste0("Structural undercount: ", n_flag, " of ", nrow(st_win),
+               " legislatures in view",
+               if (n_outside > 0)
+                 paste0(" (+", n_outside, " outside the date range)") else "")))
+    }
+
     tags$p(
       style = "margin-bottom:4px; font-size:0.95em;",
       tags$span(style = "color:#c0392b; font-weight:bold;",
@@ -1455,6 +1518,7 @@ server <- function(input, output, session) {
       " | ",
       tags$span(style = "color:#2874a6; font-weight:bold;",
                 paste0("Undercount: ", pct_under, "% of days")),
+      struct_span,
       tags$span(style = "color:#666;",
                 paste0("  (", format(n_total, big.mark = ","), " days with parliament size data)"))
     )
@@ -1710,6 +1774,203 @@ server <- function(input, output, session) {
     },
     content = overcount_table$export
   )
+
+  # --- Structural undercount: flagged legislatures + drill-down (RESE_MP tab) ---
+
+  # Flagged legislatures in display order; the DT and the detail panel both
+  # read this so row indices always agree. Scoped to the visible date range so
+  # the table matches the plot bands (widen the range to reach the rest).
+  undercount_flagged_df <- reactive({
+    uf <- undercount_flags()
+    req(!is.null(uf))
+    fs <- uf$stats[uf$stats$evaluated & uf$stats$flagged, , drop = FALSE]
+    fs[fs$leg_end >= input$date_range[1] &
+         fs$leg_start <= input$date_range[2], , drop = FALSE]
+  })
+
+  output$undercount_flagged <- renderUI({
+    uf <- undercount_flags()
+    if (is.null(uf)) return(NULL)
+    st <- uf$stats[uf$stats$evaluated, , drop = FALSE]
+    # Window-scoped to match the plot bands and the metrics count; out-of-range
+    # flagged legislatures are reported as a note rather than listed here.
+    in_win <- st$leg_end >= input$date_range[1] &
+              st$leg_start <= input$date_range[2]
+    st_win    <- st[in_win, , drop = FALSE]
+    n_flag    <- sum(st_win$flagged)
+    n_outside <- sum(st$flagged) - n_flag
+    pct <- function(x) sprintf("%.1f%%", 100 * x)
+
+    baseline_note <- tags$small(
+      style = "color:#666; display:block; margin-bottom:4px;",
+      paste0("Detected per legislature against this country's own vacancy ",
+             "baseline (median relative deficit ", pct(uf$baseline),
+             "): flags when the median (chronic) deficit exceeds ",
+             pct(uf$chronic_thr), " of seats or the worst 90-day (acute) ",
+             "deficit exceeds ", pct(uf$acute_thr),
+             ". Frictional vacancy between by-elections never flags.",
+             if (!is.na(uf$coverage_end))
+               paste0(" Days after ", format_pcc_date(uf$coverage_end),
+                      " are excluded as scrape vintage.") else ""))
+
+    # Note pointing at flagged legislatures that fall outside the date range.
+    outside_note <- if (n_outside > 0) tags$p(
+      style = "font-size:0.85em; color:#e67e22; margin-bottom:4px;",
+      paste0(n_outside, " more flagged legislature",
+             if (n_outside != 1) "s fall" else " falls",
+             " outside the current date range — widen it to see ",
+             if (n_outside != 1) "them." else "it."))
+
+    if (n_flag == 0) {
+      return(tagList(
+        tags$h5("Structurally undercounted legislatures"),
+        baseline_note,
+        tags$p(style = "color:#28a745; font-weight:bold;",
+               paste0("✓ None of the ", nrow(st_win),
+                      " legislatures in view is structurally undercounted.")),
+        outside_note
+      ))
+    }
+    tagList(
+      tags$h5(paste0("Structurally undercounted legislatures (", n_flag,
+                     " of ", nrow(st_win), " in view)")),
+      baseline_note,
+      outside_note,
+      tags$p(style = "font-size:0.85em; color:#e67e22; margin-bottom:4px;",
+             "Click a row to see the diagnosis and open a GitHub issue."),
+      DT::DTOutput("undercount_leg_dt")
+    )
+  })
+
+  output$undercount_leg_dt <- DT::renderDT({
+    fs <- undercount_flagged_df()
+    req(nrow(fs) > 0)
+    pct <- function(x) sprintf("%.1f%%", 100 * x)
+    df <- data.frame(
+      Legislature       = fs$parliament_id,
+      Period            = paste0(format_pcc_date(fs$leg_start), " – ",
+                                 format_pcc_date(fs$leg_end)),
+      `Chronic deficit` = pct(fs$chronic),
+      `Acute deficit`   = pct(fs$acute),
+      `Worst window`    = paste0(format_pcc_date(fs$acute_start), " – ",
+                                 format_pcc_date(fs$acute_end)),
+      Severity          = paste0(fs$severity,
+                                 ifelse(fs$truncated, " (coverage-truncated)", "")),
+      check.names = FALSE)
+    DT::datatable(
+      df, selection = "single", rownames = FALSE,
+      caption = htmltools::tags$small(style = "color:#666;",
+                                      "Click a row for diagnosis."),
+      options = list(dom = "t", ordering = FALSE, paging = FALSE))
+  })
+
+  # Diagnostic packet for the clicked legislature: deficit runs above the flag
+  # threshold, plus the RESE departure/arrival waves around the worst window,
+  # and a shape classification of the suspected cause.
+  undercount_leg_sets <- reactive({
+    i <- req(input$undercount_leg_dt_rows_selected)
+    uf <- undercount_flags()
+    req(!is.null(uf))
+    fs <- undercount_flagged_df()
+    req(i <= nrow(fs))
+    leg <- fs[i, ]
+    daily_leg <- uf$daily[uf$daily$date >= leg$leg_start &
+                            uf$daily$date <= leg$leg_end, , drop = FALSE]
+    base  <- join_poli_bio(rese_mp_rows(RESE, input$country_select), POLI)
+    waves <- undercount_wave_sets(base, leg$acute_start, leg$acute_end)
+    list(
+      leg   = leg,
+      runs  = undercount_runs(daily_leg, uf$chronic_thr),
+      departure = waves$departure,
+      arrival   = waves$arrival,
+      shape = undercount_shape_label(leg$leg_start, leg$leg_end,
+                                     leg$acute_start, leg$acute_end,
+                                     leg$acute, uf$coverage_end),
+      thresholds = list(baseline = uf$baseline, chronic_thr = uf$chronic_thr,
+                        acute_thr = uf$acute_thr))
+  })
+
+  # Curated-column snapshots feeding the wave CSV attachments (all rows).
+  undercount_snap <- function(which) reactive({
+    df <- undercount_leg_sets()[[which]]
+    df[, intersect(overcount_context_cols, names(df)), drop = FALSE]
+  })
+  undercount_departure_snap <- undercount_snap("departure")
+  undercount_arrival_snap   <- undercount_snap("arrival")
+
+  output$undercount_leg_detail <- renderUI({
+    req(input$undercount_leg_dt_rows_selected)
+    s   <- undercount_leg_sets()
+    leg <- s$leg
+    cc  <- input$country_select
+    pct <- function(x) sprintf("%.1f%%", 100 * x)
+    cur <- function(df) df[, intersect(overcount_context_cols, names(df)),
+                           drop = FALSE]
+
+    path <- issue_path(cc, "RESE", "undercount", leg$parliament_id)
+    auto_summary <- build_undercount_summary(
+      leg, s$thresholds, s$runs,
+      departure = cur(s$departure), arrival = cur(s$arrival),
+      shape = s$shape)
+
+    runs_display <- if (nrow(s$runs) > 0) {
+      data.frame(
+        start = sapply(s$runs$start_date, format_pcc_date),
+        end   = sapply(s$runs$end_date, format_pcc_date),
+        days  = s$runs$days,
+        peak_missing = s$runs$peak_deficit,
+        mean_missing = s$runs$mean_deficit)
+    }
+
+    section <- function(title, df, note = NULL) {
+      if (is.null(df) || nrow(df) == 0) return(NULL)
+      tagList(
+        tags$p(style = "font-weight:bold; margin-top:12px;", title),
+        if (!is.null(note)) tags$p(
+          style = "font-size:0.85em; color:#666; margin:0 0 4px;", note),
+        df_to_html_table(df))
+    }
+
+    tagList(
+      tags$hr(),
+      tags$p(
+        style = "font-weight:bold; color:#e67e22;",
+        paste0("Structural undercount: ", leg$parliament_id, " (",
+               format_pcc_date(leg$leg_start), " – ",
+               format_pcc_date(leg$leg_end), ")",
+               if (isTRUE(leg$truncated)) " — coverage-truncated" else "")),
+      tags$p(
+        paste0("Chronic (median) deficit: ", pct(leg$chronic),
+               " of seats  |  Acute (worst 90-day) deficit: ", pct(leg$acute),
+               " over ", format_pcc_date(leg$acute_start), " – ",
+               format_pcc_date(leg$acute_end),
+               "  |  Severity: ", leg$severity)),
+      tags$p(
+        style = "font-size:0.9em; color:#555;",
+        tags$b("Suspected cause: "), s$shape),
+      section(
+        sprintf("Deficit runs above the flag threshold (%d):", nrow(s$runs)),
+        runs_display,
+        "Contiguous stretches with more seats missing than the country's flagging threshold."),
+      section(
+        sprintf("Departure wave – entries ending around the worst window (%d):",
+                nrow(s$departure)),
+        cur(s$departure),
+        "A cohort ending together suggests truncated or wrong end dates."),
+      section(
+        sprintf("Arrival wave – entries starting around the worst window (%d):",
+                nrow(s$arrival)),
+        cur(s$arrival),
+        "If the deficit closes when this wave lands, start dates likely follow a later convention than the parliament start."),
+      issue_path_tag(path, auto_summary, plot_key = "rese_daily",
+                     table_key = {
+                       tk <- character(0)
+                       if (nrow(s$departure) > 0) tk <- c(tk, departure = "undercount_departure")
+                       if (nrow(s$arrival) > 0)   tk <- c(tk, arrival   = "undercount_arrival")
+                       if (length(tk) > 0) tk else NULL
+                     })
+    )
+  })
 
   # --- POLI tab ---
 
@@ -1978,6 +2239,8 @@ server <- function(input, output, session) {
     overcount_opening    = overcount_opening_snap,
     overcount_peak       = overcount_peak_snap,
     overcount_throughout = overcount_throughout_snap,
+    undercount_departure = undercount_departure_snap,
+    undercount_arrival   = undercount_arrival_snap,
     poli_missing = poli_missing_table$snapshot
   )
 

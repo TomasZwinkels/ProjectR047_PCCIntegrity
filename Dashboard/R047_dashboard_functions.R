@@ -155,9 +155,11 @@ detail_default_cols_map <- list(
 overcount_default_cols <- c("res_entry_id", "pers_id", "res_entry_start",
                             "res_entry_end", "political_function", "parliament_id")
 
-# The three RESE political_function codes counted as parliamentary membership.
-# Kept in one place so every overcount-detail set matches build_daily_counts().
-mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+# The RESE political_function codes counted as parliamentary membership.
+# Kept in one place so every over/undercount-detail set matches
+# build_daily_counts() (which must use the same four codes).
+mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09",
+                 "NT_LE_T3_NA_11")
 
 # Columns shown in the overcount context tables/CSVs (opening, peak roster,
 # present-throughout). Wider than overcount_default_cols: adds name + birth_date
@@ -455,7 +457,151 @@ build_overcount_summary <- function(ep, rese_ending,
   paste(lines, collapse = "\n")
 }
 
-# Query GitHub issues matching the given labels.
+# --- Structural-undercount drill-down (RESE_MP tab) --------------------------
+# Detection lives in R047_quality_goals.R (per-legislature chronic/acute stats
+# vs the country's vacancy baseline). These helpers diagnose a legislature the
+# detector flagged: localize the deficit into contiguous runs, pull the RESE
+# entries around the worst window, and classify the episode's shape.
+
+# Contiguous runs of days whose relative deficit exceeds `threshold` within a
+# legislature's daily slice. Returns one row per run with seat-level context.
+undercount_runs <- function(daily_leg, threshold) {
+  empty <- data.frame(start_date = as.Date(character(0)),
+                      end_date = as.Date(character(0)),
+                      days = integer(0), peak_deficit = integer(0),
+                      mean_deficit = numeric(0))
+  if (is.null(daily_leg) || nrow(daily_leg) == 0) return(empty)
+  over <- daily_leg$rel_deficit > threshold
+  runs <- rle(over)
+  ends   <- cumsum(runs$lengths)
+  starts <- ends - runs$lengths + 1
+  keep   <- which(runs$values)
+  out <- lapply(keep, function(k) {
+    d <- daily_leg[starts[k]:ends[k], , drop = FALSE]
+    deficit <- d$parliament_size - d$n_seated
+    data.frame(start_date = d$date[1], end_date = d$date[nrow(d)],
+               days = nrow(d), peak_deficit = max(deficit),
+               mean_deficit = round(mean(deficit), 1))
+  })
+  if (length(out) == 0) return(empty)
+  df <- do.call(rbind, out)
+  df[order(-df$days), , drop = FALSE]
+}
+
+# RESE entries around the worst (acute) window of a flagged legislature:
+#   departure : entries ending in [win_start - margin, win_end] — the wave
+#               whose (possibly wrong/truncated) end dates open the hole
+#   arrival   : entries starting in [win_start, win_end + margin] — the wave
+#               that eventually fills it; a late arrival wave at the
+#               legislature opening is the start-date-convention signature
+# `base` is a (bio-joined) rese_mp_rows() frame.
+undercount_wave_sets <- function(base, win_start, win_end, margin = 14) {
+  departure <- base[!is.na(base$end_date) &
+                      base$end_date >= win_start - margin &
+                      base$end_date <= win_end, , drop = FALSE]
+  arrival <- base[!is.na(base$start_date) &
+                    base$start_date >= win_start &
+                    base$start_date <= win_end + margin, , drop = FALSE]
+  list(departure = departure[order(departure$end_date), , drop = FALSE],
+       arrival   = arrival[order(arrival$start_date), , drop = FALSE])
+}
+
+# Classify the shape of a flagged legislature's worst window into suspected
+# cause(s). Multiple tags can apply (e.g. an early dissolution is near-total
+# AND sits at the legislature end). `tol` = days of slack at the boundaries.
+undercount_shape_label <- function(leg_start, leg_end, win_start, win_end,
+                                   win_mean_rel, coverage_end = as.Date(NA),
+                                   tol = 7) {
+  tags <- character(0)
+  if (win_mean_rel >= 0.5)
+    tags <- c(tags, paste0("near-total absence (window mean ",
+                           round(100 * win_mean_rel), "% of seats) - data ",
+                           "missing wholesale, not vacancy"))
+  if (win_start <= leg_start + tol)
+    tags <- c(tags, paste0("opening gap - RESE start dates may follow a later ",
+                           "convention (first session / oath) than the PARL ",
+                           "leg_period_start_date (election)"))
+  if (win_end >= leg_end - tol)
+    tags <- c(tags, paste0("closing gap - RESE end dates may end before the ",
+                           "PARL leg_period_end_date (early dissolution / ",
+                           "truncated end dates)"))
+  if (!is.na(coverage_end) && win_end >= coverage_end - tol)
+    tags <- c(tags, "runs into the data-coverage boundary (scrape vintage)")
+  if (length(tags) == 0)
+    tags <- "mid-term deficit - departures without recorded replacements?"
+  paste(tags, collapse = "; ")
+}
+
+# Build auto-summary for a structurally undercounted legislature.
+# leg        : one row of undercount_legislature_stats() (+ flagged/severity)
+# thresholds : list(baseline, chronic_thr, acute_thr) from
+#              undercount_flag_legislatures()
+# runs       : undercount_runs() output for this legislature
+# departure/arrival : curated wave frames (undercount_wave_sets())
+# shape      : undercount_shape_label() output
+build_undercount_summary <- function(leg, thresholds, runs,
+                                     departure = NULL, arrival = NULL,
+                                     shape = NULL) {
+  pct <- function(x) sprintf("%.1f%%", 100 * x)
+  lines <- c(
+    paste0("**Legislature:** ", leg$parliament_id, " (",
+           format_pcc_date(leg$leg_start), " -- ",
+           format_pcc_date(leg$leg_end), ", ", leg$n_days,
+           " evaluated days", if (isTRUE(leg$truncated))
+             "; truncated at the data-coverage boundary" else "", ")"),
+    paste0("**Structural undercount, severity:** ", leg$severity),
+    paste0("**Chronic (median) deficit:** ", pct(leg$chronic),
+           " of seats  |  **Acute (worst ",
+           "window) deficit:** ", pct(leg$acute), " over ",
+           format_pcc_date(leg$acute_start), " -- ",
+           format_pcc_date(leg$acute_end)),
+    paste0("**Country baseline (by-design vacancy floor):** ",
+           pct(thresholds$baseline), "  |  flag thresholds: chronic >",
+           pct(thresholds$chronic_thr), ", acute >", pct(thresholds$acute_thr))
+  )
+  if (!is.null(shape) && nzchar(shape)) {
+    lines <- c(lines, "", paste0("**Shape classification:** ", shape))
+  }
+  if (!is.null(runs) && nrow(runs) > 0) {
+    runs_display <- data.frame(
+      start = sapply(runs$start_date, format_pcc_date),
+      end   = sapply(runs$end_date, format_pcc_date),
+      days  = runs$days,
+      peak_missing = runs$peak_deficit,
+      mean_missing = runs$mean_deficit)
+    lines <- c(lines, "",
+               paste0("**Deficit runs above the flag threshold (",
+                      nrow(runs), "):**"),
+               "", df_to_md_table(runs_display, max_rows = 15))
+  }
+  if (!is.null(departure) && nrow(departure) > 0) {
+    lines <- c(lines, "",
+               paste0("**Departure wave -- entries ending around the worst ",
+                      "window (", nrow(departure), "):** a cohort ending ",
+                      "together suggests truncated or wrong end dates."),
+               "", df_to_md_table(departure))
+  }
+  if (!is.null(arrival) && nrow(arrival) > 0) {
+    lines <- c(lines, "",
+               paste0("**Arrival wave -- entries starting around the worst ",
+                      "window (", nrow(arrival), "):** if the deficit closes ",
+                      "when this wave lands, the start dates likely follow a ",
+                      "later convention than the parliament start."),
+               "", df_to_md_table(arrival))
+  }
+  lines <- c(lines, "",
+             paste0("_Interpretation: an undercount means fewer seated MPs in ",
+                    "RESE than the official parliament size in PARL. Unlike ",
+                    "overcounts, small undercounts can be real (seats vacant ",
+                    "until by-elections); this legislature exceeds the ",
+                    "country's own vacancy floor. Likely error classes -- ",
+                    "start dates recorded at a later convention, end dates ",
+                    "truncated, a cohort of missing RESE rows, or a wrong ",
+                    "PARL parliament_size / leg_period boundary. When ",
+                    "possible, name the specific pers_id(s)._"))
+  paste(lines, collapse = "\n")
+}
+
 # Can pass either an issue_path_str (split into labels) or a labels vector.
 # Returns a data.frame with number, title, state, url (or empty df on failure).
 gh_list_issues <- function(repo, issue_path_str = NULL, labels = NULL) {

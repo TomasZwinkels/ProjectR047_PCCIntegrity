@@ -46,7 +46,8 @@ quality_goals <- list(
   goal("rese_hard",  "RESE", "RESE hard integrity checks pass", "checks_pass",     "country", NA),
   goal("rese_start", "RESE", "Start dates complete",           "date_complete",       "country", 100, var = "start_date"),
   goal("rese_end",   "RESE", "End dates complete (excl. sitting)", "date_complete_ended", "country", 100, var = "end_date"),
-  goal("rese_over",  "RESE", "Overcount-free parliament-days",  "overcount_free",     "country", 99.5)
+  goal("rese_over",  "RESE", "Overcount-free parliament-days",  "overcount_free",     "country", 99.5),
+  goal("rese_under", "RESE", "No structurally undercounted parliaments", "undercount_structural", "country", NA)
 )
 
 # --- Small helpers ----------------------------------------------------------
@@ -73,13 +74,134 @@ quality_goals <- list(
   RESE[RESE$country_abb == cc & RESE$political_function %in% mp_codes, , drop = FALSE]
 }
 
-# Format a computed pass/fail result into the cell display string.
-.qg_result <- function(value, pass, display) {
+# Format a computed pass/fail result into the cell display string. `tooltip`
+# (optional) is rendered as the cell's hover title in render_goals_table().
+.qg_result <- function(value, pass, display, tooltip = NULL) {
   list(value = value, pass = pass, display = display,
-       na = is.na(pass))
+       na = is.na(pass), tooltip = tooltip)
 }
 
 .qg_na_result <- function() .qg_result(NA_real_, NA, "n/a")
+
+# --- Undercount: structural per-legislature statistics -----------------------
+# Undercount is not one phenomenon. Most countries carry a "frictional" vacancy
+# floor by design (seats stay empty until by-elections), so day-level
+# undercounting is normal and country-specific. What we flag is the
+# *structural* case: a legislature whose seated count sits well below its own
+# country's typical vacancy floor, either chronically (most of the term) or
+# acutely (a sustained window). Detection is per legislature; contiguous-run
+# episodes are a diagnosis tool, not a detector.
+#
+# Thresholds are baseline-relative — the country's own median relative deficit
+# encodes its by-design floor — with two absolute bounds:
+#   floor: never flag deficits any country would consider frictional
+#   cap:   always flag deficits this deep, even where the whole series is bad
+#          (a uniformly undercounted country would otherwise mask itself,
+#          since its baseline is computed from the same broken data)
+undercount_config <- list(
+  min_days       = 30,     # legislatures with fewer covered days are not scored
+  chronic_mult   = 2,      # flag when a stat exceeds this multiple of baseline
+  chronic_floor  = 0.01,   # chronic threshold never below 1% of seats
+  chronic_cap    = 0.05,   # median deficit >=5% of seats always flags
+  acute_window   = 90,     # days in the worst-window (acute) statistic
+  acute_floor    = 0.05,   # acute threshold never below 5% of seats
+  acute_cap      = 0.10,   # a 90-day window >=10% of seats always flags
+  cliff_rel      = 0.5,    # relative deficit that reads as missing data
+  cliff_min_days = 7       # sustained days needed for the "coverage cliff" label
+)
+
+# Vintage guard: the date after which the RESE extract carries no information.
+# When open-ended memberships exist, coverage runs to "today" (return NA = no
+# bound). When every membership is closed, days after the last end date would
+# read as a near-100% undercount that is really the scrape vintage, so
+# undercount evaluation must stop at that date.
+undercount_coverage_end <- function(rese_mp) {
+  if (nrow(rese_mp) == 0 || any(is.na(rese_mp$end_date))) return(as.Date(NA))
+  max(rese_mp$end_date)
+}
+
+# Daily relative deficit over the days that can be evaluated: parliament size
+# known, and inside the coverage window. Overcount days clip to 0 deficit.
+undercount_daily <- function(dc, coverage_end = as.Date(NA)) {
+  dc <- dc[!is.na(dc$parliament_size) & dc$parliament_size > 0, , drop = FALSE]
+  if (!is.na(coverage_end)) dc <- dc[dc$date <= coverage_end, , drop = FALSE]
+  dc$rel_deficit <- pmax(dc$parliament_size - dc$n_seated, 0) / dc$parliament_size
+  dc
+}
+
+# Worst mean over any `w` consecutive values (w shrinks to length(x) if
+# needed). Returns the mean plus the window's start/end indices (first window
+# when the maximum repeats) so callers can locate the worst stretch.
+.qg_roll_worst_window <- function(x, w) {
+  n <- length(x)
+  w <- min(w, n)
+  cs <- cumsum(c(0, x))
+  means <- (cs[(w + 1):(n + 1)] - cs[1:(n + 1 - w)]) / w
+  i <- which.max(means)
+  list(mean = means[i], start = i, end = i + w - 1)
+}
+
+.qg_has_cliff <- function(rel, cliff_rel, min_days) {
+  r <- rle(rel >= cliff_rel)
+  any(r$values & r$lengths >= min_days)
+}
+
+# Per-legislature statistics over the (already coverage-guarded) daily series:
+#   chronic         median relative deficit across the legislature's covered days
+#   acute           worst `acute_window`-day mean relative deficit
+#   acute_start/end dates of that worst window (first window if the max repeats)
+#   cliff           TRUE if a >=cliff_rel deficit held for >=cliff_min_days
+#   truncated       TRUE if the legislature extends past the coverage end (its
+#                   stats cover only the days up to the vintage boundary)
+# leg_start/leg_end carry the legislature period through for downstream
+# consumers (plot shading, drill-down windows).
+undercount_legislature_stats <- function(daily, parl_cc,
+                                         coverage_end = as.Date(NA),
+                                         config = undercount_config) {
+  parl_cc <- parl_cc[!is.na(parl_cc$leg_period_start_date) &
+                       !is.na(parl_cc$leg_period_end_date), , drop = FALSE]
+  if (nrow(parl_cc) == 0) return(NULL)
+  rows <- lapply(seq_len(nrow(parl_cc)), function(i) {
+    ls  <- parl_cc$leg_period_start_date[i]
+    le  <- parl_cc$leg_period_end_date[i]
+    d   <- daily[daily$date >= ls & daily$date <= le, , drop = FALSE]
+    n   <- nrow(d)
+    win <- if (n > 0) .qg_roll_worst_window(d$rel_deficit, config$acute_window)
+    data.frame(
+      parliament_id = parl_cc$parliament_id[i],
+      leg_start = ls,
+      leg_end   = le,
+      n_days    = n,
+      evaluated = n >= config$min_days,
+      chronic   = if (n > 0) stats::median(d$rel_deficit) else NA_real_,
+      acute     = if (n > 0) win$mean else NA_real_,
+      acute_start = if (n > 0) d$date[win$start] else as.Date(NA),
+      acute_end   = if (n > 0) d$date[win$end] else as.Date(NA),
+      cliff     = if (n > 0) .qg_has_cliff(d$rel_deficit, config$cliff_rel,
+                                           config$cliff_min_days) else NA,
+      truncated = !is.na(coverage_end) && le > coverage_end,
+      stringsAsFactors = FALSE)
+  })
+  do.call(rbind, rows)
+}
+
+# Flag legislatures against the country baseline (its median relative deficit,
+# i.e. its by-design vacancy floor). Severity: "coverage cliff" when the
+# legislature contains a sustained >=50% deficit (missing data, not vacancy),
+# otherwise "structural".
+undercount_flag_legislatures <- function(stats, baseline,
+                                         config = undercount_config) {
+  chronic_thr <- min(max(config$chronic_mult * baseline, config$chronic_floor),
+                     config$chronic_cap)
+  acute_thr   <- min(max(config$chronic_mult * baseline, config$acute_floor),
+                     config$acute_cap)
+  stats$flagged <- stats$evaluated &
+    (stats$chronic > chronic_thr | stats$acute > acute_thr)
+  stats$severity <- ifelse(!stats$flagged, "",
+                           ifelse(stats$cliff, "coverage cliff", "structural"))
+  list(stats = stats, baseline = baseline,
+       chronic_thr = chronic_thr, acute_thr = acute_thr)
+}
 
 # --- Evaluator: one goal for one country ------------------------------------
 # Returns list(value, pass, display, na). Reads only from `ctx`:
@@ -194,6 +316,52 @@ evaluate_goal <- function(goal, cc, ctx) {
     return(.qg_result(value, pass, sprintf("%.2f%%", value)))
   }
 
+  # ---- RESE: no structurally undercounted parliaments ----
+  # Per-legislature detection (chronic median + acute worst-window deficit)
+  # against the country's own vacancy baseline; see undercount_config above.
+  # Cell shows flagged/evaluated legislatures; hover lists the flagged ones.
+  if (m == "undercount_structural") {
+    dc <- ctx$daily_counts_fn(cc)
+    if (is.null(dc) || nrow(dc) == 0) return(.qg_na_result())
+    dc <- dc[dc$date >= ctx$period_start & dc$date <= ctx$period_end, ,
+             drop = FALSE]
+    coverage_end <- undercount_coverage_end(
+      .qg_rese_mp(ctx$RESE, cc, ctx$mp_codes))
+    daily <- undercount_daily(dc, coverage_end)
+    if (nrow(daily) == 0) return(.qg_na_result())
+
+    parl_cc <- ctx$PARL[ctx$PARL$country_abb == cc &
+                          ctx$PARL$level == "NT" &
+                          ctx$PARL$assembly_abb == ctx$assembly_map[[cc]], ,
+                        drop = FALSE]
+    stats <- undercount_legislature_stats(daily, parl_cc, coverage_end)
+    if (is.null(stats) || !any(stats$evaluated)) return(.qg_na_result())
+
+    fl <- undercount_flag_legislatures(stats, stats::median(daily$rel_deficit))
+    st <- fl$stats[fl$stats$evaluated, , drop = FALSE]
+    n_flag <- sum(st$flagged)
+    pct_line <- function(x) sprintf("%.1f%%", 100 * x)
+    tooltip <- paste0(
+      "Baseline (median rel. deficit): ", pct_line(fl$baseline),
+      " | thresholds: chronic >", pct_line(fl$chronic_thr),
+      ", acute(", undercount_config$acute_window, "d) >",
+      pct_line(fl$acute_thr),
+      if (!is.na(coverage_end) && coverage_end < ctx$period_end)
+        paste0(" | data coverage ends ", format(coverage_end)) else "",
+      if (n_flag > 0) paste0(
+        "\nFlagged: ",
+        paste(sprintf("%s (chronic %s, acute %s, %s%s)",
+                      st$parliament_id[st$flagged],
+                      pct_line(st$chronic[st$flagged]),
+                      pct_line(st$acute[st$flagged]),
+                      st$severity[st$flagged],
+                      ifelse(st$truncated[st$flagged],
+                             ", coverage-truncated", "")),
+              collapse = "; ")) else "")
+    return(.qg_result(n_flag, n_flag == 0,
+                      sprintf("%d/%d parl", n_flag, nrow(st)), tooltip))
+  }
+
   stop(sprintf("evaluate_goal: unknown metric '%s'", m))
 }
 
@@ -254,6 +422,7 @@ render_goals_table <- function(project, goals, matrix, countries,
         style = paste0("padding:6px 10px; border-bottom:1px solid #eee;",
                        " text-align:center; font-family:monospace; font-size:0.85em;",
                        " background:", cell_bg(res), ";"),
+        title = res$tooltip,
         paste0(res$display, cell_mark(res)))
     })
     htmltools::tags$tr(label_cell, value_cells)
@@ -284,6 +453,16 @@ render_goals_table <- function(project, goals, matrix, countries,
       htmltools::tags$code("k/n"),
       " is the number of that dataframe's integrity checks passing (matching its tab); the row is green only at ",
       htmltools::tags$code("n/n"), "."),
+    htmltools::tags$p(
+      style = "margin:0 0 4px;",
+      htmltools::tags$b("Reading the undercount row: "),
+      htmltools::tags$code("k/n parl"),
+      " means k of the n scored legislatures are structurally undercounted — their median (chronic) ",
+      "or worst-90-day (acute) seat deficit exceeds the country's own vacancy baseline ",
+      "(frictional vacancy between by-elections is by design and never flags). ",
+      "Hover a cell for the baseline, thresholds, and the flagged legislatures with severity ",
+      "(", htmltools::tags$i("coverage cliff"), " = ≥50% of seats missing for ≥7 days, i.e. missing data). ",
+      "Days after the country's last recorded membership end date are excluded as scrape vintage, not undercount."),
     htmltools::tags$p(
       style = "margin:0;",
       "Evaluated over ", format(project$period_start), " – ",

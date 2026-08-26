@@ -727,3 +727,110 @@ test_that("daily size build stops when a fluctuating term lacks its changeover d
     "changes mid-term"
   )
 })
+
+# --- structural-undercount drill-down helpers ---
+
+test_that("mp_pf_codes carries all four MP codes used by build_daily_counts", {
+  expect_setequal(mp_pf_codes, c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
+                                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"))
+})
+
+test_that("undercount_runs localizes contiguous above-threshold stretches", {
+  daily <- data.frame(
+    date = seq(as.Date("2000-01-01"), by = "day", length.out = 10),
+    n_seated        = c(100, 90, 90, 88, 100, 100, 95, 95, 100, 100),
+    parliament_size = 100)
+  daily$rel_deficit <- (daily$parliament_size - daily$n_seated) / daily$parliament_size
+
+  runs <- undercount_runs(daily, threshold = 0.04)
+  # Days 2-4 (10-12 missing) and days 7-8 (5 missing) exceed 4%.
+  expect_equal(nrow(runs), 2)
+  expect_equal(runs$days, c(3L, 2L))              # sorted longest first
+  expect_equal(runs$start_date[1], as.Date("2000-01-02"))
+  expect_equal(runs$end_date[1],   as.Date("2000-01-04"))
+  expect_equal(runs$peak_deficit[1], 12)
+  expect_equal(runs$mean_deficit[1], round(mean(c(10, 10, 12)), 1))
+
+  # Nothing above threshold -> empty frame, not an error.
+  expect_equal(nrow(undercount_runs(daily, threshold = 0.5)), 0)
+})
+
+test_that("undercount_wave_sets splits departures and arrivals around the window", {
+  base <- data.frame(
+    res_entry_id = paste0("E", 1:5),
+    pers_id      = paste0("XX_P", 1:5),
+    start_date = as.Date(c("1999-01-01",  # sitting long before  -> neither
+                           "2000-02-10",  # starts inside window -> arrival
+                           "2000-03-20",  # starts within margin after -> arrival
+                           "1999-06-01",  # ends within margin before -> departure
+                           "1999-06-01")),# ends long before     -> neither
+    end_date   = as.Date(c(NA, NA, NA, "2000-01-25", "1999-12-01")),
+    stringsAsFactors = FALSE)
+  w <- undercount_wave_sets(base, as.Date("2000-02-01"), as.Date("2000-03-15"),
+                            margin = 14)
+  expect_equal(w$departure$res_entry_id, "E4")
+  expect_equal(w$arrival$res_entry_id, c("E2", "E3"))
+})
+
+test_that("undercount_shape_label classifies opening/closing/near-total/vintage", {
+  ls <- as.Date("2000-01-01"); le <- as.Date("2003-12-31")
+
+  expect_match(
+    undercount_shape_label(ls, le, ls, ls + 89, 0.10),
+    "opening gap")
+  expect_match(
+    undercount_shape_label(ls, le, le - 89, le, 0.10),
+    "closing gap")
+  expect_match(
+    undercount_shape_label(ls, le, as.Date("2001-06-01"),
+                           as.Date("2001-08-29"), 0.9),
+    "near-total absence")
+  expect_match(
+    undercount_shape_label(ls, le, as.Date("2001-06-01"),
+                           as.Date("2001-08-29"), 0.10,
+                           coverage_end = as.Date("2001-08-30")),
+    "coverage boundary")
+  expect_match(
+    undercount_shape_label(ls, le, as.Date("2001-06-01"),
+                           as.Date("2001-08-29"), 0.10),
+    "mid-term deficit")
+
+  # An early dissolution is near-total AND a closing gap: both tags present.
+  both <- undercount_shape_label(ls, le, le - 80, le, 1.0)
+  expect_match(both, "near-total absence")
+  expect_match(both, "closing gap")
+})
+
+test_that("build_undercount_summary assembles the sections and interpretation", {
+  leg <- data.frame(
+    parliament_id = "XX_NT-AA_2000",
+    leg_start = as.Date("2000-01-01"), leg_end = as.Date("2003-12-31"),
+    n_days = 1461, chronic = 0.02, acute = 0.15,
+    acute_start = as.Date("2000-01-01"), acute_end = as.Date("2000-03-30"),
+    truncated = FALSE, severity = "structural", stringsAsFactors = FALSE)
+  thresholds <- list(baseline = 0.005, chronic_thr = 0.01, acute_thr = 0.05)
+  runs <- data.frame(start_date = as.Date("2000-01-01"),
+                     end_date = as.Date("2000-04-10"),
+                     days = 101L, peak_deficit = 20L, mean_deficit = 15.0)
+  departure <- data.frame(res_entry_id = "E1", pers_id = "XX_P1")
+  arrival   <- data.frame(res_entry_id = "E2", pers_id = "XX_P2")
+
+  s <- build_undercount_summary(leg, thresholds, runs,
+                                departure = departure, arrival = arrival,
+                                shape = "opening gap - test")
+  expect_match(s, "XX_NT-AA_2000")
+  expect_match(s, "\\*\\*Chronic \\(median\\) deficit:\\*\\* 2.0%")
+  expect_match(s, "15.0%")                    # acute
+  expect_match(s, "Shape classification.*opening gap - test")
+  expect_match(s, "Deficit runs above the flag threshold \\(1\\)")
+  expect_match(s, "Departure wave")
+  expect_match(s, "Arrival wave")
+  expect_match(s, "XX_P1")
+  expect_match(s, "XX_P2")
+  expect_match(s, "_Interpretation")
+
+  # Empty waves and runs: sections drop out, header still renders.
+  s0 <- build_undercount_summary(leg, thresholds, runs[0, ])
+  expect_match(s0, "XX_NT-AA_2000")
+  expect_false(grepl("Departure wave", s0))
+})
