@@ -15,6 +15,7 @@
 ###############################################################################
 SIZE_CHANGE_DATES <- list(
   "DE_NT-BT_1949" = as.Date("1952-02-01"),  # West Berlin delegation 8 -> 19
+  "DE_NT-BT_1953" = as.Date("1957-01-04"),  # Saarland accession: 509 -> 519
   "DE_NT-BT_1987" = as.Date("1990-10-03")   # reunification: 519 -> 663
 )
 
