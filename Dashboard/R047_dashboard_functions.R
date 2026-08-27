@@ -58,6 +58,7 @@ repair_utf8 <- function(x) {
 rese_check_ids <- c(
   "persid_in_POLI", "resentryid_unique", "dates_parsed",
   "full_overlap", "near_overlap", "birthday_duplicates",
+  "parliament_id_dates",
   "parlmem_coverage", "coverage_at_date_from", "coverage_at_date_to"
 )
 
@@ -102,6 +103,11 @@ detail_default_cols_map <- list(
                               "start_diff_days", "end_diff_days"),
     birthday_duplicates   = c("pers_id_1", "name_1", "pers_id_2", "name_2",
                               "birth_date", "party_id", "parliament_id"),
+    # RESE rows + leading diagnosis columns from the parliament_id-vs-dates check
+    parliament_id_dates   = c("res_entry_id", "pers_id", "res_entry_start",
+                              "res_entry_end", "parliament_id",
+                              "expected_parliament_ids", "mismatch_type",
+                              "days_start_vs_period", "days_end_vs_period"),
     # PARL-shaped rows + n_seated
     parlmem_coverage      = c("parliament_id", "leg_period_start",
                               "leg_period_end", "assembly_abb",

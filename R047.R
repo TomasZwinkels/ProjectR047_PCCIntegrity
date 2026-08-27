@@ -149,6 +149,18 @@ birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
   verified_pairs = verified_not_duplicates)
 cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
 
+# 6b. Parliament IDs consistent with episode start/end dates
+parliament_id_dates_check <- check_RESE_parliament_id_matches_dates(RESE, PARL)
+cat("Parliament IDs consistent with episode start/end dates:",
+    ifelse(parliament_id_dates_check, "✅ PASS", "❌ FAIL"), "\n")
+if (!parliament_id_dates_check) {
+  det <- check_RESE_parliament_id_matches_dates_details(RESE, PARL)
+  cat("  Inconsistent episodes:", det$mismatch_count, "of", det$episodes_checked, "checked\n")
+  for (k in seq_along(det$summary_stats)) {
+    cat("  -", names(det$summary_stats)[k], ":", det$summary_stats[k], "\n")
+  }
+}
+
 # 7. MEME integrity checks
 cat("\n--- MEME (Party Membership) Checks ---\n")
 
@@ -213,7 +225,8 @@ cat("\n=== INTEGRITY CHECK SUMMARY ===\n")
 all_checks <- c(poli_persid_unique_check, poli_jan01_check,
                 person_id_check, entry_id_check, rese_dates_check, parl_dates_check, parl_size_check, full_overlap_check, near_overlap_check,
                 meme_persid_check, meme_partyid_check, meme_memepid_check, meme_dates_check, meme_inverted_check, meme_overlap_check, meme_party_coverage_check,
-                birthdate_dup_check, parlmem_coverage_check, coverage_datefrom_check, coverage_dateto_check)
+                birthdate_dup_check, parliament_id_dates_check,
+                parlmem_coverage_check, coverage_datefrom_check, coverage_dateto_check)
 checks_passed <- sum(all_checks)
 total_checks <- length(all_checks)
 

@@ -663,7 +663,7 @@ test_that("issue number is parsed from a typical gh output URL", {
 # --- check ID vectors ---
 
 test_that("check ID vectors have correct lengths", {
-  expect_equal(length(rese_check_ids), 9)
+  expect_equal(length(rese_check_ids), 10)
   expect_equal(length(parl_check_ids), 2)
   expect_equal(length(meme_check_ids), 9)
   expect_equal(length(poli_check_ids), 3)

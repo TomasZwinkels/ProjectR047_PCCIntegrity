@@ -1804,3 +1804,156 @@ test_that("details: ongoing episode passes and is counted in the stats", {
   expect_true(result$check_passed)
   expect_equal(unname(result$summary_stats["ongoing episodes (no end date)"]), "1")
 })
+
+# ==================================================================
+# Block: tests for parliament_id vs. episode dates consistency
+#   Functions under test: check_RESE_parliament_id_matches_dates()
+#                         check_RESE_parliament_id_matches_dates_details()
+# ==================================================================
+
+# RESE-like df with parsed dates and a parliament_id column
+mk_pid_rese <- function(parliament_id, start_dates, end_dates) {
+  n <- length(parliament_id)
+  data.frame(
+    res_entry_id  = if (n > 0) paste0("entry_", seq_len(n)) else character(0),
+    pers_id       = if (n > 0) paste0("pers_", seq_len(n)) else character(0),
+    parliament_id = parliament_id,
+    res_entry_start = start_dates,
+    res_entry_start_posoxctformat = as.POSIXct(start_dates, tz = "UTC"),
+    res_entry_end   = end_dates,
+    res_entry_end_posoxctformat   = as.POSIXct(end_dates,   tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+# PARL-like df: two consecutive TK legislatures plus one ongoing NR one
+mk_pid_parl <- function() {
+  data.frame(
+    parliament_id = c("NL_NT-TK_2000", "NL_NT-TK_2004", "CH_NT-NR_2019"),
+    leg_period_start_posoxctformat = as.POSIXct(
+      c("2000-05-01", "2004-05-01", "2019-12-02"), tz = "UTC"),
+    leg_period_end_posoxctformat = as.POSIXct(
+      c("2004-04-30", "2008-04-30", NA), tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("passes when episode dates sit inside the assigned parliament", {
+  rese <- mk_pid_rese("NL_NT-TK_2000", "2000-05-01", "2004-04-30")
+  expect_true(check_RESE_parliament_id_matches_dates(rese, mk_pid_parl()))
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_true(det$check_passed)
+  expect_equal(det$episodes_checked, 1L)
+  expect_equal(nrow(det$mismatched_episodes), 0L)
+  expect_null(det$summary_stats)
+})
+
+test_that("passes for a multi-parliament episode listing exactly the overlapped IDs", {
+  rese <- mk_pid_rese("NL_NT-TK_2000;NL_NT-TK_2004", "2000-05-01", "2008-04-30")
+  expect_true(check_RESE_parliament_id_matches_dates(rese, mk_pid_parl()))
+})
+
+test_that("flags an ID whose parliament the dates never touch, and suggests the right one", {
+  rese <- mk_pid_rese("NL_NT-TK_2000", "2004-05-01", "2008-04-30")
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_false(det$check_passed)
+  expect_equal(det$mismatch_count, 1L)
+  m <- det$mismatched_episodes
+  expect_true(grepl("extra_listed_id", m$mismatch_type))
+  expect_true(grepl("missing_overlapping_id", m$mismatch_type))
+  expect_equal(m$expected_parliament_ids, "NL_NT-TK_2004")
+})
+
+test_that("flags a multi-parliament episode that omits an overlapped legislature", {
+  rese <- mk_pid_rese("NL_NT-TK_2000", "2000-05-01", "2008-04-30")
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_false(det$check_passed)
+  m <- det$mismatched_episodes
+  expect_true(grepl("missing_overlapping_id", m$mismatch_type))
+  expect_true(grepl("ends_after_period", m$mismatch_type))
+  expect_equal(m$expected_parliament_ids, "NL_NT-TK_2000;NL_NT-TK_2004")
+  expect_equal(m$days_end_vs_period, 1461L)  # 2008-04-30 minus 2004-04-30
+})
+
+test_that("flags an unknown parliament_id", {
+  rese <- mk_pid_rese("NL_NT-TK_1888", "2000-05-01", "2004-04-30")
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_false(det$check_passed)
+  expect_true(grepl("unknown_id", det$mismatched_episodes$mismatch_type))
+})
+
+test_that("reports how far an episode sticks out of the listed period", {
+  rese <- mk_pid_rese("NL_NT-TK_2000", "2000-04-21", "2004-05-10")
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  m <- det$mismatched_episodes
+  expect_true(grepl("starts_before_period", m$mismatch_type))
+  expect_true(grepl("ends_after_period", m$mismatch_type))
+  expect_equal(m$days_start_vs_period, -10L)
+  expect_equal(m$days_end_vs_period, 10L)
+})
+
+test_that("tolerance_days turns small boundary offsets into a pass", {
+  rese <- mk_pid_rese("NL_NT-TK_2000", "2000-04-29", "2004-04-30")
+  expect_false(check_RESE_parliament_id_matches_dates(rese, mk_pid_parl()))
+  # Offset is only 2 days before period start; still overlaps -> only the
+  # coverage tag applies, which the tolerance absorbs
+  expect_true(check_RESE_parliament_id_matches_dates(rese, mk_pid_parl(),
+                                                     tolerance_days = 2))
+})
+
+test_that("blank parliament_id rows are skipped, not failed", {
+  rese <- mk_pid_rese(c("", NA), c("2000-05-01", "2000-05-01"),
+                      c("2004-04-30", "2004-04-30"))
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_true(det$check_passed)
+  expect_equal(det$episodes_checked, 0L)
+})
+
+test_that("ongoing episode in an ongoing legislature passes; ended one listed wrongly fails", {
+  rese <- mk_pid_rese(c("CH_NT-NR_2019", "NL_NT-TK_2000"),
+                      c("2019-12-02",    "2019-12-02"),
+                      c(NA,              NA))
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_false(det$check_passed)
+  expect_equal(det$mismatch_count, 1L)
+  m <- det$mismatched_episodes
+  expect_equal(m$res_entry_id, "entry_2")
+  expect_true(grepl("extra_listed_id", m$mismatch_type))
+})
+
+test_that("unparsed start date only gets the ID-existence check", {
+  rese <- mk_pid_rese(c("NL_NT-TK_2000", "NL_NT-TK_1888"), c(NA, NA), c(NA, NA))
+  det <- check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl())
+  expect_false(det$check_passed)
+  expect_equal(det$mismatch_count, 1L)
+  expect_equal(det$mismatched_episodes$mismatch_type, "unknown_id")
+})
+
+test_that("empty RESE passes trivially", {
+  rese <- mk_pid_rese(character(0), character(0), character(0))
+  expect_true(check_RESE_parliament_id_matches_dates(rese, mk_pid_parl()))
+})
+
+test_that("errors when required columns are missing", {
+  rese <- data.frame(res_entry_id = "x")
+  expect_error(check_RESE_parliament_id_matches_dates_details(rese, mk_pid_parl()),
+               "Missing required columns")
+})
+
+test_that("a 1-day handover overlap with the neighbouring term is not 'expected'", {
+  # NO-style PARL storage: adjacent periods share the handover day
+  parl <- data.frame(
+    parliament_id = c("NO_NT_2013", "NO_NT_2017"),
+    leg_period_start_posoxctformat = as.POSIXct(
+      c("2013-09-30", "2017-09-30"), tz = "UTC"),
+    leg_period_end_posoxctformat = as.POSIXct(
+      c("2017-09-30", "2021-09-30"), tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  # Episode = exactly one term, starting on the shared handover day
+  rese <- mk_pid_rese("NO_NT_2017", "2017-09-30", "2021-09-29")
+  expect_true(check_RESE_parliament_id_matches_dates(rese, parl))
+  # A single-day episode strictly inside a term still matches on 1-day overlap
+  rese1 <- mk_pid_rese("NO_NT_2013", "2015-01-10", "2015-01-10")
+  expect_true(check_RESE_parliament_id_matches_dates(rese1, parl))
+})

@@ -1337,3 +1337,215 @@ check_RESE_coverage_at_date_details <- function(RESE, date) {
     boundary_episodes = bnd$boundary_episodes
   )
 }
+
+###############################################################################
+# Function: check_RESE_parliament_id_matches_dates
+# Description:
+#   Checks whether the parliament_id assigned to each RESE parliamentary
+#   membership episode is consistent with the episode's exact start and end
+#   dates. parliament_id may hold a single ID or a semicolon-separated list
+#   (an episode spanning several legislatures, e.g.
+#   "NL_NT-TK_2023;NL_NT-TK_2025"). An episode is consistent when:
+#     1. every listed ID exists in PARL,
+#     2. the listed IDs are EXACTLY the parliaments of the same chamber
+#        (same ID prefix, e.g. "NL_NT-TK") whose legislative periods overlap
+#        the episode's [start, end] interval by at least 2 days — a 1-day
+#        overlap is a term-handover fencepost (e.g. NO stores adjacent
+#        periods sharing the handover day), not real membership; single-day
+#        episodes only need the 1-day overlap they can have — and
+#     3. the episode's dates fall inside the union span of the listed
+#        periods (start >= first listed leg_period_start - tolerance_days,
+#        end <= last listed leg_period_end + tolerance_days).
+#
+#   Episodes with a blank/NA parliament_id are SKIPPED (they cannot be
+#   validated; a separate completeness concern). Episodes whose start date
+#   failed to parse only get the ID-existence check (the dates_parsed check
+#   owns unparsed dates). Ongoing episodes (NA end) are checked on the start
+#   side only: the expected set of overlapping parliaments is indeterminate
+#   without an end date, so set-exactness and end-side coverage are skipped,
+#   but a listed parliament that ended before the episode even started is
+#   still flagged.
+#
+# Inputs:
+#   - RESE: preprocessed data.frame with parliament_id,
+#       res_entry_start_posoxctformat, res_entry_end_posoxctformat
+#       (caller filters to parliamentary membership rows)
+#   - PARL: preprocessed data.frame with parliament_id,
+#       leg_period_start_posoxctformat, leg_period_end_posoxctformat
+#       (NA leg period end = ongoing legislature, treated as open-ended)
+#   - tolerance_days: integer, slack allowed on the coverage comparison
+#       (default 0: exact)
+#
+# Returns:
+#   - TRUE  if every checkable episode is consistent (or none are checkable)
+#   - FALSE if any episode has an unknown ID, a wrong/missing/extra ID for
+#           its dates, or dates outside the listed periods
+###############################################################################
+check_RESE_parliament_id_matches_dates <- function(RESE, PARL,
+                                                   tolerance_days = 0) {
+  check_RESE_parliament_id_matches_dates_details(
+    RESE, PARL, tolerance_days)$check_passed
+}
+
+###############################################################################
+# Function: check_RESE_parliament_id_matches_dates_details
+# Description:
+#   Detailed version of check_RESE_parliament_id_matches_dates. Besides the
+#   pass/fail verdict it returns every inconsistent episode with a diagnosis:
+#   which of the listed parliament IDs are unknown, which same-chamber
+#   parliaments the episode's dates ACTUALLY overlap (expected_parliament_ids
+#   - the suggested correction), and how far the episode's start/end stick
+#   out of the listed periods in days.
+#
+# Returns: List with
+#   - check_passed          (TRUE/FALSE)
+#   - episodes_checked      episodes with a non-blank parliament_id
+#   - mismatch_count        number of inconsistent episodes
+#   - mismatched_episodes   RESE rows with leading diagnosis columns:
+#       mismatch_type            comma-joined tags: unknown_id,
+#                                missing_overlapping_id (dates overlap a
+#                                parliament not listed), extra_listed_id
+#                                (a listed parliament the dates never touch),
+#                                starts_before_period, ends_after_period
+#       expected_parliament_ids  same-chamber parliaments overlapping the
+#                                episode dates, ";"-joined in period order
+#                                (empty when the start date is unparsed or
+#                                the episode is ongoing)
+#       days_start_vs_period     episode start minus first listed period
+#                                start (negative = starts before the listed
+#                                period; NA when no listed ID is known)
+#       days_end_vs_period       episode end minus last listed period end
+#                                (positive = ends after the listed period)
+#   - summary_stats         named character vector of key facts (NULL on
+#                           pass); rendered as a "Key facts" block by the
+#                           dashboard and in GitHub-issue technical details
+###############################################################################
+check_RESE_parliament_id_matches_dates_details <- function(RESE, PARL,
+                                                           tolerance_days = 0) {
+  req_rese <- c("parliament_id", "res_entry_start_posoxctformat",
+                "res_entry_end_posoxctformat")
+  req_parl <- c("parliament_id", "leg_period_start_posoxctformat",
+                "leg_period_end_posoxctformat")
+  miss <- c(setdiff(req_rese, names(RESE)), setdiff(req_parl, names(PARL)))
+  if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse = ", "))
+
+  ep_start <- as.Date(RESE$res_entry_start_posoxctformat)
+  ep_end   <- as.Date(RESE$res_entry_end_posoxctformat)
+
+  far_future <- as.Date("9999-12-31")   # open-ended sentinel
+  parl_ids   <- as.character(PARL$parliament_id)
+  parl_start <- as.Date(PARL$leg_period_start_posoxctformat)
+  parl_end   <- as.Date(PARL$leg_period_end_posoxctformat)
+  parl_end[is.na(parl_end)] <- far_future   # ongoing legislature
+
+  # Chamber prefix: everything before the last "_" segment
+  # ("NL_NT-TK_2023" -> "NL_NT-TK", "NO_NT_1913" -> "NO_NT")
+  id_prefix   <- function(x) sub("_[^_]*$", "", x)
+  parl_prefix <- id_prefix(parl_ids)
+
+  given_raw <- trimws(as.character(RESE$parliament_id))
+  has_id    <- !is.na(given_raw) & given_raw != ""
+  given_ids <- vector("list", nrow(RESE))
+  given_ids[has_id] <- lapply(strsplit(given_raw[has_id], ";", fixed = TRUE),
+                              function(x) unique(trimws(x)))
+
+  n <- nrow(RESE)
+  mismatch_type  <- character(n)   # "" = consistent
+  expected_str   <- character(n)
+  days_start_off <- rep(NA_integer_, n)
+  days_end_off   <- rep(NA_integer_, n)
+  n_unparsed     <- 0L
+  n_ongoing      <- 0L
+
+  for (i in which(has_id)) {
+    ids     <- given_ids[[i]]
+    known   <- match(ids, parl_ids)
+    tags    <- character(0)
+    if (anyNA(known)) tags <- "unknown_id"
+    known   <- known[!is.na(known)]
+
+    s <- ep_start[i]
+    e <- ep_end[i]
+
+    if (is.na(s)) {
+      # dates_parsed owns unparsed dates; only the ID-existence tag applies
+      n_unparsed <- n_unparsed + 1L
+      mismatch_type[i] <- paste(tags, collapse = ",")
+      next
+    }
+    ongoing <- is.na(e)
+    if (ongoing) n_ongoing <- n_ongoing + 1L
+    e_eff <- if (ongoing) far_future else e
+
+    # Expected set: same-chamber parliaments whose period overlaps the episode
+    # (only determinate when the episode has an end date). Overlaps of exactly
+    # one day are ignored for multi-day episodes: some countries (e.g. NO)
+    # store adjacent legislative periods sharing the handover day, so a
+    # correctly-assigned single-term episode would otherwise "overlap" the
+    # neighbouring term by that one degenerate day.
+    if (!ongoing) {
+      cand <- which(parl_prefix %in% unique(id_prefix(ids)) & !is.na(parl_start))
+      ov_days <- as.integer(pmin(parl_end[cand], e_eff) -
+                              pmax(parl_start[cand], s)) + 1L
+      cand <- cand[ov_days >= (if (e_eff > s) 2L else 1L)]
+      cand <- cand[order(parl_start[cand])]
+      expected_str[i] <- paste(parl_ids[cand], collapse = ";")
+      if (length(setdiff(parl_ids[cand], ids)) > 0)
+        tags <- c(tags, "missing_overlapping_id")
+      if (length(setdiff(parl_ids[known], parl_ids[cand])) > 0)
+        tags <- c(tags, "extra_listed_id")
+    } else if (length(known) > 0 && any(parl_end[known] < s)) {
+      # ongoing episode listing a parliament that ended before it started
+      tags <- c(tags, "extra_listed_id")
+    }
+
+    # Coverage against the union span of the listed periods
+    if (length(known) > 0) {
+      lo <- min(parl_start[known], na.rm = TRUE)
+      hi <- max(parl_end[known])
+      days_start_off[i] <- as.integer(s - lo)
+      if (hi < far_future && !ongoing) days_end_off[i] <- as.integer(e - hi)
+      if (s < lo - tolerance_days) tags <- c(tags, "starts_before_period")
+      if (!ongoing && e > hi + tolerance_days) tags <- c(tags, "ends_after_period")
+    }
+
+    mismatch_type[i] <- paste(tags, collapse = ",")
+  }
+
+  bad <- which(mismatch_type != "")
+  mismatched_episodes <- cbind(
+    mismatch_type           = mismatch_type[bad],
+    expected_parliament_ids = expected_str[bad],
+    days_start_vs_period    = days_start_off[bad],
+    days_end_vs_period      = days_end_off[bad],
+    RESE[bad, , drop = FALSE],
+    stringsAsFactors = FALSE
+  )
+
+  summary_stats <- NULL
+  if (length(bad) > 0) {
+    tag_count <- function(tag) {
+      as.character(sum(grepl(tag, mismatch_type[bad], fixed = TRUE)))
+    }
+    summary_stats <- c(
+      "episodes with a parliament_id checked"      = as.character(sum(has_id)),
+      "episodes with blank parliament_id (skipped)" = as.character(sum(!has_id)),
+      "inconsistent episodes"                       = as.character(length(bad)),
+      "listing an ID not in PARL"                   = tag_count("unknown_id"),
+      "dates overlap a parliament not listed"       = tag_count("missing_overlapping_id"),
+      "listing a parliament the dates never touch"  = tag_count("extra_listed_id"),
+      "starting before the listed period"           = tag_count("starts_before_period"),
+      "ending after the listed period"              = tag_count("ends_after_period"),
+      "unparsed start date (ID-existence check only)" = as.character(n_unparsed),
+      "ongoing episodes (start-side checks only)"   = as.character(n_ongoing)
+    )
+  }
+
+  list(
+    check_passed        = length(bad) == 0,
+    episodes_checked    = as.integer(sum(has_id)),
+    mismatch_count      = length(bad),
+    mismatched_episodes = mismatched_episodes,
+    summary_stats       = summary_stats
+  )
+}

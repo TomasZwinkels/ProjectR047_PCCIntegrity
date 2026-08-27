@@ -205,6 +205,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
     "No fully overlapping parl. episodes",
     "No near-overlapping episodes (\u22642 days)",
     "No same-birthday duplicates in factions",
+    "Parliament IDs consistent with episode start/end dates",
     "All parliaments in date range have membership data",
     paste0("\u22651 seated MP in RESE on date_from (", format(date_from, "%Y-%m-%d"),
            ") \u2014 detects gap from parliament active before range start"),
@@ -220,6 +221,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
     check_RESE_duplicate_birthdates_in_faction_details(
       rese_mp, POLI, PARL, MEME, assembly_map[[cc]],
       verified_pairs = verified_not_duplicates),
+    check_RESE_parliament_id_matches_dates_details(rese_mp, PARL),
     check_RESE_parlmem_coverage_details(
       rese_mp, PARL, assembly_map[[cc]], date_from, date_to),
     check_RESE_coverage_at_date_details(rese_mp, date_from),
@@ -234,6 +236,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
 rese_detail_keys <- c(
   "missing_rows", "duplicate_rows", "full_rows_with_na_dates",
   "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs",
+  "mismatched_episodes",
   "parliaments_no_data", "boundary_episodes", "boundary_episodes"
 )
 
