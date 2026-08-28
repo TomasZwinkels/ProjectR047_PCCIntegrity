@@ -663,16 +663,17 @@ test_that("issue number is parsed from a typical gh output URL", {
 # --- check ID vectors ---
 
 test_that("check ID vectors have correct lengths", {
-  expect_equal(length(rese_check_ids), 10)
-  expect_equal(length(parl_check_ids), 2)
-  expect_equal(length(meme_check_ids), 9)
-  expect_equal(length(poli_check_ids), 3)
+  expect_equal(length(rese_check_ids), 11)
+  expect_equal(length(parl_check_ids), 3)
+  expect_equal(length(meme_check_ids), 10)
+  expect_equal(length(poli_check_ids), 4)
 })
 
 test_that("POLI check id / detail-key vectors stay index-aligned", {
   # poli_check_detail_keys lives in app.R (Shiny globals); mirror it here so a
   # future added/removed POLI check can't silently desync the aligned vectors.
-  poli_check_detail_keys <- c("duplicate_rows", "jan01_rows", "invalid_rows")
+  poli_check_detail_keys <- c("duplicate_rows", "jan01_rows", "invalid_rows",
+                              "special_char_rows")
   expect_equal(length(poli_check_ids), length(poli_check_detail_keys))
   expect_true(all(poli_check_ids %in% names(detail_default_cols_map$POLI)))
 })

@@ -59,19 +59,21 @@ rese_check_ids <- c(
   "persid_in_POLI", "resentryid_unique", "dates_parsed",
   "full_overlap", "near_overlap", "birthday_duplicates",
   "parliament_id_dates",
-  "parlmem_coverage", "coverage_at_date_from", "coverage_at_date_to"
+  "parlmem_coverage", "coverage_at_date_from", "coverage_at_date_to",
+  "special_chars"
 )
 
-parl_check_ids <- c("dates_parsed", "parliament_size_valid")
+parl_check_ids <- c("dates_parsed", "parliament_size_valid", "special_chars")
 
 meme_check_ids <- c(
   "persid_in_POLI", "partyid_in_PART", "memepid_unique",
   "dates_parsed", "inverted_dates", "full_overlap",
   "parlmembers_have_party", "same_party_overlap_during_parliament",
-  "diff_party_overlap_during_parliament"
+  "diff_party_overlap_during_parliament", "special_chars"
 )
 
-poli_check_ids <- c("persid_unique", "birthdate_jan01_excess", "gender_valid")
+poli_check_ids <- c("persid_unique", "birthdate_jan01_excess", "gender_valid",
+                    "special_chars")
 
 # --- Curated column views for the problem-row tables ---
 
@@ -118,14 +120,19 @@ detail_default_cols_map <- list(
                               "political_function", "parliament_id"),
     coverage_at_date_to   = c("boundary_side", "res_entry_id", "pers_id",
                               "res_entry_start", "res_entry_end",
-                              "political_function", "parliament_id")
+                              "political_function", "parliament_id"),
+    # Long-format special-char table: one row per offending cell
+    special_chars         = c("res_entry_id", "pers_id",
+                              "column", "value", "bad_chars")
   ),
   PARL = list(
     dates_parsed          = c("parliament_id", "leg_period_start",
                               "leg_period_end", "day_of_first_session"),
     parliament_size_valid = c("parliament_id", "leg_period_start",
                               "leg_period_end", "parliament_size",
-                              "assembly_abb")
+                              "assembly_abb"),
+    special_chars         = c("parliament_id", "assembly_abb",
+                              "column", "value", "bad_chars")
   ),
   MEME = list(
     persid_in_POLI  = c("memep_id", "pers_id", "party_id",
@@ -147,13 +154,17 @@ detail_default_cols_map <- list(
         "overlap_start", "overlap_end", "one_day", "parliament_id"),
     diff_party_overlap_during_parliament =
       c("pers_id", "memep_id_1", "memep_id_2", "party_id_1", "party_id_2",
-        "overlap_start", "overlap_end", "one_day", "parliament_id")
+        "overlap_start", "overlap_end", "one_day", "parliament_id"),
+    special_chars   = c("memep_id", "pers_id", "party_id",
+                        "column", "value", "bad_chars")
   ),
   POLI = list(
     # id_<cc>_* columns are appended automatically for frame == "POLI"
     persid_unique          = c("pers_id", "last_name", "first_name", "birth_date", "wikidata_id"),
     birthdate_jan01_excess = c("pers_id", "last_name", "first_name", "birth_date"),
-    gender_valid           = c("pers_id", "last_name", "first_name", "gender")
+    gender_valid           = c("pers_id", "last_name", "first_name", "gender"),
+    special_chars          = c("pers_id", "last_name", "first_name",
+                               "column", "value", "bad_chars")
   )
 )
 

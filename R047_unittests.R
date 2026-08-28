@@ -319,3 +319,108 @@ test_that("format_pcc_date returns NA for NA input", {
 test_that("format_pcc_date works with POSIXct input", {
   expect_equal(format_pcc_date(as.POSIXct("1959-11-05 12:00:00")), "05nov1959")
 })
+
+################################################################################
+# Unit Tests for check_special_chars_details (codebook: text must be ASCII)
+################################################################################
+
+test_that("clean ASCII data frame passes the special-char check", {
+  df <- data.frame(
+    pers_id   = c("NL_A_1", "NL_B_2"),
+    last_name = c("Ellemeet", "Standerat"),
+    note      = c("plain", "ascii only"),
+    stringsAsFactors = FALSE
+  )
+  res <- check_special_chars_details(df, id_cols = c("pers_id"))
+  expect_true(res$check_passed)
+  expect_equal(res$special_char_count, 0L)
+  expect_equal(nrow(res$special_char_rows), 0L)
+})
+
+test_that("diacritics and non-ASCII labels are flagged with their row + char", {
+  df <- data.frame(
+    pers_id   = c("CH_A_1", "CH_B_2", "CH_C_3"),
+    last_name = c("Muëller", "Clean", "Zwïn"),      # e-diaeresis, i-diaeresis
+    chamber   = c("Ständerat", "Nationalrat", "clean"),  # a-umlaut
+    stringsAsFactors = FALSE
+  )
+  res <- check_special_chars_details(df, id_cols = c("pers_id"))
+  expect_false(res$check_passed)
+  # 2 offending last_name cells + 1 offending chamber cell = 3
+  expect_equal(res$special_char_count, 3L)
+  expect_setequal(unique(res$special_char_rows$column), c("last_name", "chamber"))
+  # The offending row's id is carried through
+  expect_true("CH_A_1" %in% res$special_char_rows$pers_id)
+  # bad_chars isolates the offending glyph(s)
+  chamber_row <- res$special_char_rows[res$special_char_rows$column == "chamber", ]
+  expect_equal(chamber_row$bad_chars, "ä")
+})
+
+test_that("check_special_chars detection is encoding-tag independent", {
+  # A UTF-8 byte sequence tagged as "unknown" (as read.csv often leaves it)
+  # must still be caught: detection is byte-based, not encoding-based.
+  x <- "çedilla"                 # c-cedilla + "edilla"
+  Encoding(x) <- "unknown"
+  df <- data.frame(pers_id = "X_1", first_name = x, stringsAsFactors = FALSE)
+  res <- check_special_chars_details(df, id_cols = "pers_id")
+  expect_false(res$check_passed)
+  expect_equal(res$special_char_count, 1L)
+})
+
+test_that("check_special_chars scans factor columns and only text columns", {
+  df <- data.frame(
+    pers_id = c("A_1", "A_2"),
+    faction = factor(c("Grüne", "SPD")),   # u-umlaut in a factor level
+    seats   = c(10L, 20L),                        # numeric: never scanned
+    stringsAsFactors = FALSE
+  )
+  res <- check_special_chars_details(df, id_cols = "pers_id")
+  expect_false(res$check_passed)
+  expect_equal(unique(res$special_char_rows$column), "faction")
+  expect_false("seats" %in% res$special_char_rows$column)
+})
+
+test_that("check_special_chars ignores NA and empty strings", {
+  df <- data.frame(
+    pers_id = c("A_1", "A_2"),
+    note    = c(NA_character_, ""),
+    stringsAsFactors = FALSE
+  )
+  res <- check_special_chars_details(df, id_cols = "pers_id")
+  expect_true(res$check_passed)
+})
+
+test_that("check_special_chars wrapper returns the logical only", {
+  df <- data.frame(pers_id = "A_1", x = "Ständerat",
+                   stringsAsFactors = FALSE)
+  expect_false(check_special_chars(df, id_cols = "pers_id"))
+  clean <- data.frame(pers_id = "A_1", x = "Standerat",
+                      stringsAsFactors = FALSE)
+  expect_true(check_special_chars(clean, id_cols = "pers_id"))
+})
+
+test_that("check_special_chars tolerates absent id_cols", {
+  df <- data.frame(x = c("Ständerat", "clean"), stringsAsFactors = FALSE)
+  res <- check_special_chars_details(df)          # no id_cols
+  expect_false(res$check_passed)
+  expect_equal(res$special_char_count, 1L)
+  expect_true(all(c("column", "value", "bad_chars") %in%
+                    names(res$special_char_rows)))
+})
+
+test_that("check_special_chars repairs stray latin1 bytes to valid UTF-8", {
+  # read.csv leaves a stray latin1 byte (0xE7 = c-cedilla) tagged "unknown",
+  # which is invalid UTF-8. Regression: this used to flow out unrepaired and
+  # crash the on-click detail path (nchar -> "invalid multibyte string").
+  x <- rawToChar(as.raw(c(0x46, 0x72, 0xE7, 0x6f)))   # "Fr<0xE7>o"
+  expect_false(validUTF8(x))
+  df <- data.frame(pers_id = "NL_X_1", first_name = x, stringsAsFactors = FALSE)
+  res <- check_special_chars_details(df, id_cols = "pers_id")
+  expect_false(res$check_passed)
+  expect_equal(res$special_char_count, 1L)
+  # value is now valid UTF-8 and the real glyph is recovered
+  expect_true(all(validUTF8(res$special_char_rows$value)))
+  expect_equal(res$special_char_rows$bad_chars, "ç")
+  # the downstream ops that used to abort now succeed
+  expect_silent(nchar(res$special_char_rows$value))
+})

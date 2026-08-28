@@ -418,3 +418,118 @@ find_suspicious_end_dates <- function(RESE, PARL, threshold_days = 14)
   result_df <- do.call(rbind, suspicious_entries)
   return(result_df)
 }
+
+###############################################################################
+# Function: check_special_chars_details
+#
+# Description:
+#   Detects "special" (non-ASCII) characters in the text columns of any PCC
+#   data frame. The PCC codebook requires all stored text -- names, place
+#   names, faction and chamber labels -- to be transliterated to plain 7-bit
+#   ASCII: a name carrying an "i with a diaeresis" is stored as "i",
+#   "Staenderat"/"Ständerat" is stored as "Standerat", accented vowels are
+#   folded to their base letter. Any byte outside the ASCII range (>= 0x80) is
+#   therefore a coding error, whatever its declared encoding.
+#
+#   Generic across data frames (RESE / PARL / MEME / POLI / ...): every
+#   character or factor column is scanned. id_cols are identifier columns copied
+#   into the result so each offending cell can be traced to its row (e.g.
+#   pers_id, res_entry_id); only those present in df are used.
+#
+#   Detection is byte-based (useBytes = TRUE) so it does not depend on how R
+#   happened to tag the source encoding -- a UTF-8 "e-acute" tagged "unknown"
+#   is still caught. Returns the standard check-detail shape: check_passed, a
+#   long-format problem table (one row per offending cell) under
+#   special_char_rows, a count, and summary_stats.
+#
+#   Scanned columns are first repaired to valid UTF-8 (to_utf8, lossless: any
+#   invalid byte sequence is reinterpreted as latin1 -- every byte is defined
+#   there). This is essential: read.csv frequently leaves a stray latin1 byte
+#   (e.g. 0xE7 = "c-cedilla") tagged "unknown", which is invalid UTF-8. Without
+#   the repair the offending value flows out as an invalidly-encoded string and
+#   any downstream char-level op (nchar/substr in the issue summary, DT's JSON
+#   serialisation) aborts with "invalid multibyte string". The repair both
+#   prevents that and renders the real glyph so the reviewer sees WHICH
+#   character is wrong.
+#
+###############################################################################
+
+check_special_chars_details <- function(df, id_cols = character(0)) {
+  # Lossless repair to valid UTF-8 (mirrors repair_utf8() in the dashboard;
+  # duplicated here so this shared function has no cross-file dependency).
+  to_utf8 <- function(x) {
+    x   <- enc2utf8(as.character(x))
+    bad <- !is.na(x) & !validUTF8(x)
+    if (any(bad)) x[bad] <- iconv(x[bad], from = "latin1", to = "UTF-8")
+    x
+  }
+  id_cols   <- intersect(id_cols, names(df))
+  text_cols <- names(df)[vapply(df, function(col)
+    is.character(col) || is.factor(col), logical(1))]
+  # Any byte not in the 7-bit ASCII range 0x01-0x7F. Matched in bytes mode so a
+  # multi-byte UTF-8 character (all of whose bytes are >= 0x80) is flagged
+  # regardless of the string's declared encoding.
+  pat <- "[^\x01-\x7f]"
+
+  parts <- list()
+  for (cn in text_cols) {
+    v   <- to_utf8(df[[cn]])   # valid UTF-8: keeps every non-ASCII byte, so
+    bad <- !is.na(v) & grepl(pat, v, perl = TRUE, useBytes = TRUE)  # still flagged
+    if (!any(bad)) next
+    idx <- which(bad)
+    rec <- df[idx, id_cols, drop = FALSE]
+    rownames(rec) <- NULL
+    # id columns are ASCII by construction, but repair them too so the whole
+    # assembled row is uniformly valid UTF-8.
+    for (ic in id_cols) rec[[ic]] <- to_utf8(rec[[ic]])
+    disp <- v[idx]
+    rec$column    <- cn
+    rec$value     <- disp
+    rec$bad_chars <- vapply(disp, function(s) {
+      # perl split on a valid UTF-8 string yields whole characters (not bytes).
+      ch  <- unlist(strsplit(s, "", perl = TRUE))
+      hit <- ch[grepl(pat, ch, perl = TRUE, useBytes = TRUE)]
+      paste(unique(hit), collapse = " ")
+    }, character(1), USE.NAMES = FALSE)
+    parts[[length(parts) + 1L]] <- rec
+  }
+
+  if (length(parts) == 0L) {
+    empty <- df[0, id_cols, drop = FALSE]
+    empty$column    <- character(0)
+    empty$value     <- character(0)
+    empty$bad_chars <- character(0)
+    return(list(
+      check_passed       = TRUE,
+      special_char_rows  = empty,
+      special_char_count = 0L,
+      summary_stats = c(
+        "Text columns scanned"     = length(text_cols),
+        "Cells with special chars" = 0L,
+        "Columns affected"         = 0L
+      )
+    ))
+  }
+
+  out <- do.call(rbind, parts)
+  rownames(out) <- NULL
+  distinct_chars <- sort(unique(unlist(strsplit(
+    paste(out$bad_chars, collapse = " "), "\\s+"))))
+  distinct_chars <- distinct_chars[distinct_chars != ""]
+  list(
+    check_passed       = FALSE,
+    special_char_rows  = out,
+    special_char_count = nrow(out),
+    summary_stats = c(
+      "Text columns scanned"     = length(text_cols),
+      "Cells with special chars" = nrow(out),
+      "Columns affected"         = length(unique(out$column)),
+      "Distinct special chars"   = paste(distinct_chars, collapse = " ")
+    )
+  )
+}
+
+# Thin logical wrapper (matches the check_*/check_*_details convention).
+check_special_chars <- function(df, id_cols = character(0)) {
+  check_special_chars_details(df, id_cols)$check_passed
+}

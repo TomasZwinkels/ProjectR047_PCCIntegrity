@@ -210,7 +210,8 @@ run_rese_checks <- function(cc, date_from, date_to) {
     paste0("\u22651 seated MP in RESE on date_from (", format(date_from, "%Y-%m-%d"),
            ") \u2014 detects gap from parliament active before range start"),
     paste0("\u22651 seated MP in RESE on date_to (", format(date_to, "%Y-%m-%d"),
-           ") \u2014 detects gap from parliament active at range end")
+           ") \u2014 detects gap from parliament active at range end"),
+    "No special (non-ASCII) characters in text fields"
   )
   details <- list(
     check_RESE_persid_in_POLI_details(rese_mp, POLI),
@@ -225,7 +226,10 @@ run_rese_checks <- function(cc, date_from, date_to) {
     check_RESE_parlmem_coverage_details(
       rese_mp, PARL, assembly_map[[cc]], date_from, date_to),
     check_RESE_coverage_at_date_details(rese_mp, date_from),
-    check_RESE_coverage_at_date_details(rese_mp, date_to)
+    check_RESE_coverage_at_date_details(rese_mp, date_to),
+    # Scan the FULL country RESE table (not just MP episodes) for non-ASCII text.
+    check_special_chars_details(RESE[RESE$country_abb == cc, ],
+                                id_cols = c("res_entry_id", "pers_id"))
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -237,7 +241,8 @@ rese_detail_keys <- c(
   "missing_rows", "duplicate_rows", "full_rows_with_na_dates",
   "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs",
   "mismatched_episodes",
-  "parliaments_no_data", "boundary_episodes", "boundary_episodes"
+  "parliaments_no_data", "boundary_episodes", "boundary_episodes",
+  "special_char_rows"
 )
 
 # Render the issue path with an "Open new issue" button and inline form.
@@ -460,11 +465,14 @@ run_parl_checks <- function(cc) {
   ))
   labels <- c(
     "All PARL dates parsed successfully",
-    "All parliament sizes are valid"
+    "All parliament sizes are valid",
+    "No special (non-ASCII) characters in text fields"
   )
   details <- list(
     check_anyNAinPARLdates_details(parl, level = "NT"),
-    check_PARL_parliament_size_meaningful_details(parl, level = "NT")
+    check_PARL_parliament_size_meaningful_details(parl, level = "NT"),
+    check_special_chars_details(PARL[PARL$country_abb == cc, ],
+                                id_cols = c("parliament_id", "assembly_abb"))
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -472,7 +480,8 @@ run_parl_checks <- function(cc) {
   )
 }
 
-parl_detail_keys <- c("full_rows_with_na_dates", "full_rows_with_problems")
+parl_detail_keys <- c("full_rows_with_na_dates", "full_rows_with_problems",
+                      "special_char_rows")
 
 run_meme_checks <- function(cc, date_from, date_to) {
   meme <- suppressMessages(preprocess_MEMEdates(
@@ -495,7 +504,8 @@ run_meme_checks <- function(cc, date_from, date_to) {
     "No duplicate MEME episodes",
     "All MPs have party membership data",
     "No same-party MEME overlaps during parliamentary service",
-    "No different-party MEME overlaps during parliamentary service"
+    "No different-party MEME overlaps during parliamentary service",
+    "No special (non-ASCII) characters in text fields"
   )
   details <- list(
     check_MEME_persid_in_POLI_details(meme, POLI),
@@ -506,7 +516,10 @@ run_meme_checks <- function(cc, date_from, date_to) {
     check_MEME_anyfulloverlap_details(meme),
     check_MEME_parlmembers_have_party_details(rese_mp_in_range, meme),
     check_MEME_same_party_overlap_during_parliament_details(meme, rese_mp_in_range),
-    check_MEME_diff_party_overlap_during_parliament_details(meme, rese_mp_in_range)
+    check_MEME_diff_party_overlap_during_parliament_details(meme, rese_mp_in_range),
+    check_special_chars_details(
+      MEME[substr(MEME$pers_id, 1, nchar(cc)) == cc, ],
+      id_cols = c("memep_id", "pers_id", "party_id"))
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -518,7 +531,8 @@ meme_detail_keys <- c(
   "missing_rows", "missing_rows", "duplicate_rows",
   "full_rows_with_na_startdates", "inverted_rows",
   "overlapping_episodes", "missing_rese_rows",
-  "overlapping_rows", "overlapping_rows"
+  "overlapping_rows", "overlapping_rows",
+  "special_char_rows"
 )
 
 run_poli_checks <- function(cc) {
@@ -526,12 +540,15 @@ run_poli_checks <- function(cc) {
   labels <- c(
     "All POLI person IDs are unique",
     "POLI birth dates not over-concentrated on 01-Jan",
-    "All gender values are codebook-valid (m/f/nb/tm/tf)"
+    "All gender values are codebook-valid (m/f/nb/tm/tf)",
+    "No special (non-ASCII) characters in text fields"
   )
   details <- list(
     check_POLI_persid_unique_details(poli_cc),
     check_POLI_birthdate_jan01_excess_details(poli_cc),
-    check_POLI_gender_valid_details(poli_cc)
+    check_POLI_gender_valid_details(poli_cc),
+    check_special_chars_details(
+      poli_cc, id_cols = c("pers_id", "last_name", "first_name"))
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -539,7 +556,8 @@ run_poli_checks <- function(cc) {
   )
 }
 
-poli_check_detail_keys <- c("duplicate_rows", "jan01_rows", "invalid_rows")
+poli_check_detail_keys <- c("duplicate_rows", "jan01_rows", "invalid_rows",
+                            "special_char_rows")
 
 checks_dt <- function(df) {
   DT::datatable(
