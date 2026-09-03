@@ -355,6 +355,38 @@ test_that("parse_parliament_size_series splits at the registered changeover date
   expect_equal(res$seg_start[2], as.Date("1990-10-03"))
 })
 
+test_that("NL 1945 size is 76 through 19nov and 100 from 20nov", {
+  res <- parse_parliament_size_series("NL_NT-TK_1945",
+           as.Date("1945-09-25"), as.Date("1946-06-03"), "76;100")
+  expect_equal(res$size, c(76L, 100L))
+  expect_equal(res$seg_start, as.Date(c("1945-09-25", "1945-11-20")))
+  expect_equal(res$seg_end, as.Date(c("1945-11-19", "1946-06-03")))
+})
+
+test_that("parliament_size_for_snapshot preserves out-of-term constant sizes", {
+  size <- parliament_size_for_snapshot(
+    "NL_NT-TK_1917",
+    as.Date("1917-06-28"), as.Date("1918-09-16"), "100",
+    as.Date("1916-01-26")
+  )
+  expect_equal(size, 100L)
+})
+
+test_that("parliament_size_for_snapshot clamps fluctuating terms at both bounds", {
+  before <- parliament_size_for_snapshot(
+    "NL_NT-TK_1945",
+    as.Date("1945-09-25"), as.Date("1946-06-03"), "76;100",
+    as.Date("1945-09-01")
+  )
+  after <- parliament_size_for_snapshot(
+    "NL_NT-TK_1945",
+    as.Date("1945-09-25"), as.Date("1946-06-03"), "76;100",
+    as.Date("1946-07-01")
+  )
+  expect_equal(before, 76L)
+  expect_equal(after, 100L)
+})
+
 test_that("parse_parliament_size_series stops when a changeover date is missing", {
   expect_error(
     parse_parliament_size_series("DE_NT-BT_9999",

@@ -16,7 +16,8 @@
 SIZE_CHANGE_DATES <- list(
   "DE_NT-BT_1949" = as.Date("1952-02-01"),  # West Berlin delegation 8 -> 19
   "DE_NT-BT_1953" = as.Date("1957-01-04"),  # Saarland accession: 509 -> 519
-  "DE_NT-BT_1987" = as.Date("1990-10-03")   # reunification: 519 -> 663
+  "DE_NT-BT_1987" = as.Date("1990-10-03"),  # reunification: 519 -> 663
+  "NL_NT-TK_1945" = as.Date("1945-11-20")   # Temporary -> Provisional TK: 76 -> 100
 )
 
 ###############################################################################
@@ -98,6 +99,57 @@ parse_parliament_size_series <- function(parliament_id, leg_start, leg_end,
   data.frame(parliament_id = parliament_id,
              seg_start = seg_start, seg_end = seg_end,
              size = sizes, stringsAsFactors = FALSE)
+}
+
+###############################################################################
+# Function: parliament_size_for_snapshot
+# Description:
+#   Return the official parliament size associated with a cohort snapshot.
+#   peak_entry snapshots can legitimately fall just outside the formal term;
+#   in that case only the date used to select the size segment is clamped to
+#   the term boundary. The caller's snapshot_day itself is not changed.
+# Input:
+#   - parliament_id, leg_start, leg_end, parliament_size : as for
+#     parse_parliament_size_series()
+#   - snapshot_day : Date scalar used to select the applicable size
+#   - registry : named changeover-date registry
+# Output:
+#   - integer scalar parliament size
+###############################################################################
+parliament_size_for_snapshot <- function(parliament_id, leg_start, leg_end,
+                                         parliament_size, snapshot_day,
+                                         registry = SIZE_CHANGE_DATES) {
+  segments <- parse_parliament_size_series(
+    parliament_id, leg_start, leg_end, parliament_size, registry
+  )
+
+  # Constant-size terms need no temporal lookup. This preserves the historical
+  # peak_entry behavior even when its data-driven snapshot predates the term.
+  if (nrow(segments) == 1L) return(segments$size[1])
+
+  snapshot_day <- as.Date(snapshot_day)
+  leg_start <- as.Date(leg_start)
+  leg_end <- as.Date(leg_end)
+  if (length(snapshot_day) != 1L || is.na(snapshot_day)) {
+    stop("snapshot_day must be one non-missing Date.", call. = FALSE)
+  }
+
+  size_reference_day <- snapshot_day
+  if (size_reference_day < leg_start) size_reference_day <- leg_start
+  if (size_reference_day > leg_end) size_reference_day <- leg_end
+
+  segment_i <- which(
+    size_reference_day >= segments$seg_start &
+      size_reference_day <= segments$seg_end
+  )
+  if (length(segment_i) != 1L) {
+    stop(
+      "Could not resolve exactly one parliament_size for ", parliament_id,
+      " on size-reference day ", format(size_reference_day), ".",
+      call. = FALSE
+    )
+  }
+  segments$size[segment_i]
 }
 
 ###############################################################################

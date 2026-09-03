@@ -120,7 +120,6 @@ cohort_list <- list()
 
 for (i in seq_len(nrow(PARL))) {
   pid <- PARL$parliament_id[i]
-  parl_size <- as.numeric(PARL$parliament_size[i])
 
   if (snapshot_method == "official_start") {
     snapshot_day <- as.Date(PARL$leg_period_start_posoxctformat[i])
@@ -135,6 +134,18 @@ for (i in seq_len(nrow(PARL))) {
     cat("WARNING: skipping parliament", pid, "-- no snapshot day\n")
     next
   }
+
+  # A parliament may have several official sizes within one term. Resolve the
+  # segment for this snapshot without changing the data-driven snapshot itself.
+  # peak_entry snapshots outside formal term bounds use the nearest term-boundary
+  # size, preserving the generator's historical behavior for constant-size terms.
+  parl_size <- parliament_size_for_snapshot(
+    pid,
+    as.Date(PARL$leg_period_start_posoxctformat[i]),
+    as.Date(PARL$leg_period_end_posoxctformat[i]),
+    PARL$parliament_size[i],
+    snapshot_day
+  )
 
   # Find all persons seated on snapshot_day
   seated <- RESE[which(RESE$start_date <= snapshot_day & RESE$end_date >= snapshot_day), ]
