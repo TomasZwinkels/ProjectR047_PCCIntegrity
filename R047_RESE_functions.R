@@ -314,6 +314,137 @@ check_RESE_resentryid_unique_details <- function(RESE) {
 }
 
 ###############################################################################
+# RESE row/id integrity checks (GitHub issues #39, #40, #41).
+#
+# Generic over whichever RESE frame is passed. The dashboard currently runs
+# them on the MP-filtered frame in the RESE_MP tab (consistent with every other
+# check there), so RESE_MP can pass while non-MP rows elsewhere in RESE are
+# still broken. The SAME functions can later back a dedicated whole-RESE tab
+# that scans every row (incl. non-MP / blank-country_abb rows the MP frame
+# excludes -- e.g. fully-empty export records). Each follows the check_* /
+# check_*_details convention and returns summary_stats for the Key facts channel.
+###############################################################################
+
+# --- #39: every RESE row must carry a pers_id -------------------------------
+# Flags rows whose pers_id is NA or blank (the "ghost"/empty-row signature).
+# Placeholder rows carry pers_id "Vacant"/"No entries", so they are NOT flagged.
+check_RESE_persid_present_details <- function(RESE) {
+  if (!"pers_id" %in% names(RESE)) stop("RESE is missing column pers_id")
+  pid     <- RESE$pers_id
+  missing <- is.na(pid) | trimws(pid) == ""
+  rows    <- RESE[missing, , drop = FALSE]
+  rownames(rows) <- NULL
+
+  # Diagnose the two sub-groups from issue #39: rows that are completely empty
+  # (an export/junk artifact) vs. rows that carry other content but lost their
+  # pers_id (a genuine mis-key that still needs a person assigned).
+  if (nrow(rows) > 0) {
+    blank_mat <- vapply(rows, function(x) {
+      x <- as.character(x); is.na(x) | trimws(x) == ""
+    }, logical(nrow(rows)))
+    # vapply collapses to a vector when nrow(rows) == 1; force matrix shape.
+    if (is.null(dim(blank_mat))) blank_mat <- matrix(blank_mat, nrow = nrow(rows))
+    fully_empty <- rowSums(!blank_mat) == 0
+  } else {
+    fully_empty <- logical(0)
+  }
+
+  list(
+    check_passed         = !any(missing),
+    missing_persid_rows  = rows,
+    missing_persid_count = nrow(rows),
+    summary_stats = c(
+      "Rows scanned"                   = nrow(RESE),
+      "Rows with blank/absent pers_id" = nrow(rows),
+      "  - fully-empty rows"           = sum(fully_empty),
+      "  - carry other content"        = sum(!fully_empty)
+    )
+  )
+}
+
+check_RESE_persid_present <- function(RESE) {
+  check_RESE_persid_present_details(RESE)$check_passed
+}
+
+# --- #40: res_entry_id must have no leading/trailing whitespace --------------
+# A trailing space makes an id collide with its trimmed twin under any reader
+# that strips whitespace, breaking uniqueness and joins non-deterministically.
+check_RESE_resentryid_no_whitespace_details <- function(RESE) {
+  if (!"res_entry_id" %in% names(RESE)) stop("RESE is missing column res_entry_id")
+  rid <- RESE$res_entry_id
+  ws  <- !is.na(rid) & rid != trimws(rid)
+  rows <- RESE[ws, , drop = FALSE]
+  rownames(rows) <- NULL
+
+  # The independent id-integrity consequence (issue #40): how many of the
+  # whitespace ids, once trimmed, collide with an existing clean (populated) id.
+  clean_ids <- rid[!ws & !is.na(rid) & trimws(rid) != ""]
+  if (nrow(rows) > 0) {
+    rows$res_entry_id_trimmed       <- trimws(rows$res_entry_id)
+    rows$collides_with_existing_id  <- rows$res_entry_id_trimmed %in% clean_ids
+    n_collide <- sum(rows$collides_with_existing_id)
+  } else {
+    n_collide <- 0L
+  }
+
+  list(
+    check_passed        = !any(ws),
+    whitespace_id_rows  = rows,
+    whitespace_id_count = nrow(rows),
+    summary_stats = c(
+      "Rows scanned"                              = nrow(RESE),
+      "res_entry_id with leading/trailing space"  = nrow(rows),
+      "  - trimmed id collides with existing id"  = n_collide
+    )
+  )
+}
+
+check_RESE_resentryid_no_whitespace <- function(RESE) {
+  check_RESE_resentryid_no_whitespace_details(RESE)$check_passed
+}
+
+# --- #41: res_entry_id person-prefix must match pers_id ----------------------
+# res_entry_id == pers_id + "__" + index; the part before the final "__" must
+# name the same person as pers_id, else the episode is attributed to the wrong
+# politician. Blank pers_id (#39) and Vacant/No entries placeholders are out of
+# scope here. Both sides are trimmed so a trailing-space id (#40) alone does not
+# masquerade as an attribution mismatch.
+check_RESE_id_matches_persid_details <- function(RESE,
+                                                 placeholders = c("Vacant", "No entries")) {
+  need <- c("res_entry_id", "pers_id")
+  miss <- setdiff(need, names(RESE))
+  if (length(miss)) stop("RESE is missing column(s): ", paste(miss, collapse = ", "))
+  rid <- RESE$res_entry_id
+  pid <- RESE$pers_id
+
+  has_pid <- !is.na(pid) & trimws(pid) != "" & !(trimws(pid) %in% placeholders)
+  has_rid <- !is.na(rid) & trimws(rid) != ""
+  prefix  <- sub("__[^_]*$", "", rid)          # strip the final "__<index>"
+  mism    <- has_pid & has_rid & (trimws(prefix) != trimws(pid))
+  rows    <- RESE[mism, , drop = FALSE]
+  rownames(rows) <- NULL
+  if (nrow(rows) > 0) {
+    rows$res_entry_id_person_prefix <- trimws(sub("__[^_]*$", "", rows$res_entry_id))
+  }
+
+  list(
+    check_passed            = !any(mism),
+    mismatched_persid_rows  = rows,
+    mismatched_persid_count = nrow(rows),
+    summary_stats = c(
+      "Rows scanned"                         = nrow(RESE),
+      "Rows compared (real pers_id + id)"    = sum(has_pid & has_rid),
+      "res_entry_id prefix != pers_id"       = nrow(rows)
+    )
+  )
+}
+
+check_RESE_id_matches_persid <- function(RESE,
+                                        placeholders = c("Vacant", "No entries")) {
+  check_RESE_id_matches_persid_details(RESE, placeholders)$check_passed
+}
+
+###############################################################################
 # Function: check_anyNAinRESEdates_details
 # Description: Return rows and indices with NA dates after preprocessing  
 # Returns: List with NA row indices and the actual rows with problems

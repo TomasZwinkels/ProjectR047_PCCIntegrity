@@ -537,6 +537,8 @@ test_that("build_title_prompt includes issue path and summary", {
   expect_true(grepl("birth_date", prompt))
   expect_true(grepl("42 MPs", prompt))
   expect_true(grepl("max 80 chars", prompt))
+  expect_true(grepl("DESCRIPTIVE", prompt))
+  expect_true(grepl("Do NOT put a suspected cause", prompt))
 })
 
 test_that("build_description_prompt includes issue path and summary", {
@@ -663,7 +665,7 @@ test_that("issue number is parsed from a typical gh output URL", {
 # --- check ID vectors ---
 
 test_that("check ID vectors have correct lengths", {
-  expect_equal(length(rese_check_ids), 11)
+  expect_equal(length(rese_check_ids), 14)
   expect_equal(length(parl_check_ids), 3)
   expect_equal(length(meme_check_ids), 10)
   expect_equal(length(poli_check_ids), 4)
@@ -713,6 +715,18 @@ test_that("daily size steps 519 -> 663 across the registered changeover date", {
   days <- as.Date(c("1990-10-01", "1990-10-02", "1990-10-03", "1990-12-19"))
   sizes <- daily_size_for(parl_cc, days)
   expect_equal(sizes, c(519L, 519L, 663L, 663L))
+})
+
+test_that("daily NL 1945 size steps 76 -> 100 on 20 November", {
+  parl_cc <- data.frame(
+    parliament_id   = "NL_NT-TK_1945",
+    leg_start       = as.Date("1945-09-25"),
+    leg_end         = as.Date("1946-06-03"),
+    parliament_size = "76;100",
+    stringsAsFactors = FALSE
+  )
+  days <- as.Date(c("1945-09-25", "1945-11-19", "1945-11-20", "1946-06-03"))
+  expect_equal(daily_size_for(parl_cc, days), c(76L, 76L, 100L, 100L))
 })
 
 test_that("daily size build stops when a fluctuating term lacks its changeover date", {

@@ -211,7 +211,10 @@ run_rese_checks <- function(cc, date_from, date_to) {
            ") \u2014 detects gap from parliament active before range start"),
     paste0("\u22651 seated MP in RESE on date_to (", format(date_to, "%Y-%m-%d"),
            ") \u2014 detects gap from parliament active at range end"),
-    "No special (non-ASCII) characters in text fields"
+    "No special (non-ASCII) characters in text fields",
+    "All MP episodes have a pers_id",
+    "No leading/trailing whitespace in resume entry IDs",
+    "Resume entry ID names the same person as pers_id"
   )
   details <- list(
     check_RESE_persid_in_POLI_details(rese_mp, POLI),
@@ -229,7 +232,14 @@ run_rese_checks <- function(cc, date_from, date_to) {
     check_RESE_coverage_at_date_details(rese_mp, date_to),
     # Scan the FULL country RESE table (not just MP episodes) for non-ASCII text.
     check_special_chars_details(RESE[RESE$country_abb == cc, ],
-                                id_cols = c("res_entry_id", "pers_id"))
+                                id_cols = c("res_entry_id", "pers_id")),
+    # Row/id integrity (issues #39/#40/#41), scoped to the MP frame like every
+    # other check on this tab: RESE_MP can pass while non-MP rows elsewhere in
+    # RESE are still broken. The same check functions will later back a
+    # dedicated whole-RESE tab that scans every row.
+    check_RESE_persid_present_details(rese_mp),
+    check_RESE_resentryid_no_whitespace_details(rese_mp),
+    check_RESE_id_matches_persid_details(rese_mp)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -242,7 +252,8 @@ rese_detail_keys <- c(
   "overlapping_episodes", "full_episode_pairs_near_overlapping", "flagged_pairs",
   "mismatched_episodes",
   "parliaments_no_data", "boundary_episodes", "boundary_episodes",
-  "special_char_rows"
+  "special_char_rows",
+  "missing_persid_rows", "whitespace_id_rows", "mismatched_persid_rows"
 )
 
 # Render the issue path with an "Open new issue" button and inline form.

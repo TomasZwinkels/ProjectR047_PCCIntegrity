@@ -119,6 +119,106 @@ test_that("errors when res_entry_id column is missing", {
 })
 
 
+# ------------------------------------------------------------------
+# Whole-file integrity checks (#39/#40/#41)
+# ------------------------------------------------------------------
+
+# Small RESE-like frame exercising all three failure modes at once:
+#  row 1: clean
+#  row 2: fully-empty (blank pers_id + blank everything)  -> #39
+#  row 3: content but blank pers_id                       -> #39
+#  row 4: trailing space in res_entry_id, prefix matches  -> #40 (not #39/#41)
+#  row 5: prefix names a different person than pers_id     -> #41
+#  row 6: Vacant placeholder (out of scope for #41)
+mk_integrity_rese <- function() {
+  data.frame(
+    res_entry_id  = c("DE_Mueller_Anna_1950__1", "", "DE_Weber_Otto_1960__3",
+                      "DE_Klein_Uwe_1970__2 ", "CH_Chevallaz_Georges_1915__19",
+                      "Vacant__1"),
+    pers_id       = c("DE_Mueller_Anna_1950", "", "",
+                      "DE_Klein_Uwe_1970", "CH_Chavanne_Andre_1916", "Vacant"),
+    country_abb   = c("DE", "", "DE", "DE", "CH", "CH"),
+    res_entry_raw = c("raw1", "", "raw3", "raw4", "raw5", ""),
+    stringsAsFactors = FALSE
+  )
+}
+
+# --- #39: pers_id present ---
+test_that("check_RESE_persid_present passes when every row has a pers_id", {
+  RESE <- data.frame(res_entry_id = c("A__1", "B__2"),
+                     pers_id = c("A", "B"), stringsAsFactors = FALSE)
+  expect_true(check_RESE_persid_present(RESE))
+})
+
+test_that("check_RESE_persid_present flags blank and NA pers_id, keeps placeholders", {
+  RESE <- mk_integrity_rese()
+  det <- check_RESE_persid_present_details(RESE)
+  expect_false(det$check_passed)
+  expect_equal(det$missing_persid_count, 2)          # rows 2 and 3
+  expect_equal(unname(det$summary_stats["  - fully-empty rows"]), 1)   # row 2
+  expect_equal(unname(det$summary_stats["  - carry other content"]), 1) # row 3
+  # NA is treated the same as blank
+  RESE2 <- data.frame(res_entry_id = "X__1", pers_id = NA_character_,
+                      stringsAsFactors = FALSE)
+  expect_false(check_RESE_persid_present(RESE2))
+})
+
+test_that("check_RESE_persid_present errors when pers_id column is missing", {
+  expect_error(check_RESE_persid_present(data.frame(res_entry_id = "A__1")))
+})
+
+# --- #40: no whitespace in res_entry_id ---
+test_that("check_RESE_resentryid_no_whitespace passes on clean ids", {
+  RESE <- data.frame(res_entry_id = c("A__1", "B__2"),
+                     pers_id = c("A", "B"), stringsAsFactors = FALSE)
+  expect_true(check_RESE_resentryid_no_whitespace(RESE))
+})
+
+test_that("check_RESE_resentryid_no_whitespace flags trailing space and detects collision", {
+  RESE <- mk_integrity_rese()
+  # add the clean twin of the trailing-space id so the collision fires
+  RESE <- rbind(RESE, data.frame(
+    res_entry_id = "DE_Klein_Uwe_1970__2", pers_id = "DE_Klein_Uwe_1970",
+    country_abb = "DE", res_entry_raw = "twin", stringsAsFactors = FALSE))
+  det <- check_RESE_resentryid_no_whitespace_details(RESE)
+  expect_false(det$check_passed)
+  expect_equal(det$whitespace_id_count, 1)                       # row 4
+  expect_true(det$whitespace_id_rows$collides_with_existing_id[1])
+  expect_equal(unname(det$summary_stats["  - trimmed id collides with existing id"]), 1)
+})
+
+# --- #41: res_entry_id prefix matches pers_id ---
+test_that("check_RESE_id_matches_persid passes when prefixes match", {
+  RESE <- data.frame(res_entry_id = c("A_1__1", "B_2__5"),
+                     pers_id = c("A_1", "B_2"), stringsAsFactors = FALSE)
+  expect_true(check_RESE_id_matches_persid(RESE))
+})
+
+test_that("check_RESE_id_matches_persid flags only genuine attribution mismatches", {
+  RESE <- mk_integrity_rese()
+  det <- check_RESE_id_matches_persid_details(RESE)
+  expect_false(det$check_passed)
+  expect_equal(det$mismatched_persid_count, 1)                   # row 5 only
+  expect_equal(det$mismatched_persid_rows$pers_id, "CH_Chavanne_Andre_1916")
+  expect_equal(det$mismatched_persid_rows$res_entry_id_person_prefix,
+               "CH_Chevallaz_Georges_1915")
+})
+
+test_that("check_RESE_id_matches_persid: trailing-space id alone is not a mismatch", {
+  # prefix equals pers_id after trimming -> #40's territory, not #41
+  RESE <- data.frame(res_entry_id = "DE_Klein_Uwe_1970__2 ",
+                     pers_id = "DE_Klein_Uwe_1970", stringsAsFactors = FALSE)
+  expect_true(check_RESE_id_matches_persid(RESE))
+})
+
+test_that("check_RESE_id_matches_persid: blank pers_id and placeholders are out of scope", {
+  RESE <- data.frame(
+    res_entry_id = c("DE_Weber_Otto_1960__3", "Vacant__1", "No entries__1"),
+    pers_id      = c("", "Vacant", "No entries"), stringsAsFactors = FALSE)
+  expect_true(check_RESE_id_matches_persid(RESE))
+})
+
+
 
 # ==================================================================
 # Core block: preprocess_RESEdates() and check_anyNAinRESEdates()

@@ -60,7 +60,8 @@ rese_check_ids <- c(
   "full_overlap", "near_overlap", "birthday_duplicates",
   "parliament_id_dates",
   "parlmem_coverage", "coverage_at_date_from", "coverage_at_date_to",
-  "special_chars"
+  "special_chars",
+  "persid_present", "resentryid_no_whitespace", "id_matches_persid"
 )
 
 parl_check_ids <- c("dates_parsed", "parliament_size_valid", "special_chars")
@@ -123,7 +124,17 @@ detail_default_cols_map <- list(
                               "political_function", "parliament_id"),
     # Long-format special-char table: one row per offending cell
     special_chars         = c("res_entry_id", "pers_id",
-                              "column", "value", "bad_chars")
+                              "column", "value", "bad_chars"),
+    # Whole-file integrity checks (#39/#40/#41)
+    persid_present        = c("res_entry_id", "pers_id", "country_abb",
+                              "res_entry_raw", "political_function",
+                              "parliament_id"),
+    resentryid_no_whitespace = c("res_entry_id", "res_entry_id_trimmed",
+                                 "collides_with_existing_id", "pers_id",
+                                 "country_abb"),
+    id_matches_persid     = c("res_entry_id", "res_entry_id_person_prefix",
+                              "pers_id", "country_abb", "res_entry_raw",
+                              "res_entry_start", "res_entry_end")
   ),
   PARL = list(
     dates_parsed          = c("parliament_id", "leg_period_start",
@@ -868,13 +879,25 @@ codex_query <- function(prompt, model = codex_model, image = NULL) {
   })
 }
 
-# Build the prompt for generating a human-readable issue title
+# Build the prompt for generating a human-readable issue title.
+# The title must describe the observed symptom, not a suspected cause:
+# hypotheses in the summary are often refuted during investigation, and a
+# title naming the wrong culprit misleads whoever picks up the issue later.
 build_title_prompt <- function(issue_path_str, auto_summary) {
   paste0(
     "You are a data quality assistant for a parliamentary dataset ",
     "(the Political Careers In Comparison Project). ",
     "Given the following issue classification and technical details, ",
     "write a short, human-readable GitHub issue title (max 80 chars). ",
+    "The title must be purely DESCRIPTIVE of the observed symptom: ",
+    "what is wrong, in which country/parliament/dataset, and when. ",
+    "Do NOT put a suspected cause, diagnosis, or hypothesis in the ",
+    "title, and do NOT name individual politicians as likely culprits ",
+    "— the technical details below only suggest candidates, and such ",
+    "leads regularly turn out to be wrong once investigated. ",
+    "For example, prefer 'NL 1959-1963: recurring +1 seat overcount ",
+    "in Tweede Kamer' over 'Verify overlap between person A and ",
+    "person B'. ",
     "Do NOT include quotes around the title. ",
     "Reply with only the title, nothing else.\n\n",
     "Issue path: ", issue_path_str, "\n\n",
