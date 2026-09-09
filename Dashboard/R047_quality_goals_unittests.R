@@ -21,7 +21,7 @@ make_ctx <- function(POLI = NULL, RESE = NULL, PARL = NULL,
   list(
     POLI = POLI, RESE = RESE, PARL = PARL,
     mp_codes = c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
-                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"),
+                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"),
     period_start = as.Date("1946-01-01"),
     period_end   = as.Date("2025-12-31"),
     assembly_map = c(XX = "AA"),

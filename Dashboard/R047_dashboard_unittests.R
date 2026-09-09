@@ -745,9 +745,9 @@ test_that("daily size build stops when a fluctuating term lacks its changeover d
 
 # --- structural-undercount drill-down helpers ---
 
-test_that("mp_pf_codes carries all four MP codes used by build_daily_counts", {
+test_that("mp_pf_codes carries all seated MP codes used by build_daily_counts", {
   expect_setequal(mp_pf_codes, c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
-                                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"))
+                                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"))
 })
 
 test_that("undercount_runs localizes contiguous above-threshold stretches", {

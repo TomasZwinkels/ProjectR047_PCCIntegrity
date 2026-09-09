@@ -185,9 +185,9 @@ overcount_default_cols <- c("res_entry_id", "pers_id", "res_entry_start",
 
 # The RESE political_function codes counted as parliamentary membership.
 # Kept in one place so every over/undercount-detail set matches
-# build_daily_counts() (which must use the same four codes).
+# build_daily_counts() (which must use the same seated-member codes).
 mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09",
-                 "NT_LE_T3_NA_11")
+                 "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
 
 # Columns shown in the overcount context tables/CSVs (opening, peak roster,
 # present-throughout). Wider than overcount_default_cols: adds name + birth_date

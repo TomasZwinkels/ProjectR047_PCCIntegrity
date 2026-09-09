@@ -67,7 +67,7 @@ build_cohort <- function(country_code) {
   rese <- RESE |>
     filter(
       country_abb == country_code,
-      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11")
+      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
     )
 
   parl <- PARL |>
@@ -111,7 +111,7 @@ cache_dir <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/cache"
 build_daily_counts <- function(cc) {
   rese_cc <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
   parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
                     PARL$assembly_abb == assembly_map[[cc]], ]
   parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
@@ -196,7 +196,7 @@ run_rese_checks <- function(cc, date_from, date_to) {
     RESE[RESE$country_abb == cc, ]
   ))
   rese_mp <- rese_mp[rese_mp$political_function %in%
-                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
+                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
 
   labels <- c(
     "All RESE person IDs exist in POLI",
@@ -500,7 +500,7 @@ run_meme_checks <- function(cc, date_from, date_to) {
   ))
   rese_mp <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
   # For check #7 (party coverage): only MPs active within the date range
   rese_mp_in_range <- rese_mp[
     rese_mp$start_date <= date_to &
@@ -1391,7 +1391,7 @@ server <- function(input, output, session) {
     ctx <- list(
       POLI = POLI, RESE = RESE, PARL = PARL,
       mp_codes = c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
-                   "NT_LE_T3_NA_09", "NT_LE_T3_NA_11"),
+                   "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"),
       period_start = ps,
       period_end   = pe,
       assembly_map = assembly_map,
@@ -1626,7 +1626,7 @@ server <- function(input, output, session) {
     cc <- info$country
     RESE[RESE$country_abb == cc &
            RESE$political_function %in%
-             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11") &
+             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11") &
            !is.na(RESE$end_date) &
            RESE$end_date == ep$end_date, ]
   })
@@ -2018,7 +2018,7 @@ server <- function(input, output, session) {
     RESE |>
       filter(
         country_abb == input$country_select,
-        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11")
+        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
       ) |>
       pull(pers_id) |>
       unique()
