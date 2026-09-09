@@ -14,6 +14,15 @@
 # (SIZE_CHANGE_DATES). Keep the two copies in sync.
 ###############################################################################
 SIZE_CHANGE_DATES <- list(
+  # US durable size changes: R052 USA/BioGuide/source_documentation/house_size_periods.csv.
+  "US_NT-HR_1793" = as.Date("1794-09-03"),
+  "US_NT-HR_1871" = as.Date("1871-04-21"),
+  "US_NT-HR_1899" = as.Date("1900-11-06"),
+  "US_NT-HR_1905" = as.Date("1906-08-14"),
+  "US_NT-HR_1907" = as.Date(c("1907-11-16", "1908-02-04")),
+  "US_NT-HR_1935" = as.Date("1936-02-14"),
+  "US_NT-HR_1945" = as.Date("1946-07-04"),
+  "US_NT-HR_1971" = as.Date("1971-03-23"),
   "DE_NT-BT_1949" = as.Date("1952-02-01"),  # West Berlin delegation 8 -> 19
   "DE_NT-BT_1953" = as.Date("1957-01-04"),  # Saarland accession: 509 -> 519
   "DE_NT-BT_1987" = as.Date("1990-10-03"),  # reunification: 519 -> 663
