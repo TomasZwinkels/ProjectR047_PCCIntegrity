@@ -87,10 +87,13 @@ issue_size_test_client <- function(confirmed = FALSE) {
   env$llm_suggest_issue_size <- function(...) "large"
   env$llm_generate_description <- function(issue_path_str, auto_summary,
                                           image, graph_caption, issue_size,
-                                          size_confirmed) {
+                                          size_confirmed,
+                                          user_title = NULL, user_desc = NULL) {
     env$description_args <- list(size = issue_size, confirmed = size_confirmed)
+    env$draft_args <- list(title = user_title, desc = user_desc)
     env$description_prompt <- env$build_description_prompt(
-      issue_path_str, auto_summary, graph_caption, issue_size, size_confirmed)
+      issue_path_str, auto_summary, graph_caption, issue_size, size_confirmed,
+      user_title = user_title, user_desc = user_desc)
     "Some birth dates are missing."
   }
   env$posted <- NULL
@@ -120,6 +123,9 @@ issue_size_test_client <- function(confirmed = FALSE) {
   }
   env$confirm <- function() env$elements[[id("_size_confirmed")]]$checked <- TRUE
   env$field <- function(suffix) env$elements[[id(suffix)]]
+  env$set_field <- function(suffix, value) {
+    env$elements[[id(suffix)]]$value <- value
+  }
   env$suggest <- function(size) env$js("setIssueSizeSuggestion", list(
     text_id = id("_size_suggestion"), select_id = id("_size"),
     confirmed_id = id("_size_confirmed"), size = size, text = "AI suggestion"
@@ -185,4 +191,38 @@ test_that("manually changing size clears confirmation and generation errors unlo
   expect_false(client$field("_size")$disabled)
   expect_false(client$field("_size_confirmed")$disabled)
   expect_false(client$field("_ai_btn")$disabled)
+})
+
+test_that("draft text typed in the form is passed to the AI prompts", {
+  client <- issue_size_test_client()
+  on.exit(client$cleanup(), add = TRUE)
+  # Title left at the auto-filled issue path (not a draft); description typed.
+  client$set_field("_text", "Both rows share a birth date; looks like one person twice.")
+  client$click("_ai_btn")
+  client$generate()
+  expect_identical(client$draft_args$desc,
+                   "Both rows share a birth date; looks like one person twice.")
+  expect_match(client$description_prompt,
+               "Draft description:\nBoth rows share a birth date", fixed = TRUE)
+  expect_match(client$description_prompt, "build on their draft", fixed = TRUE)
+  expect_false(grepl("Draft title", client$description_prompt, fixed = TRUE))
+  # An edited title is a draft too. (After the first round the fields hold the
+  # generated text, which then becomes the draft for a regeneration.)
+  client$set_field("_title", "Two records for one MP")
+  client$set_field("_text", "Confirmed: same birth place as well.")
+  client$click("_ai_btn")
+  client$generate()
+  expect_match(client$description_prompt,
+               "Draft title: Two records for one MP", fixed = TRUE)
+  expect_match(client$description_prompt,
+               "Draft description:\nConfirmed: same birth place as well.", fixed = TRUE)
+})
+
+test_that("an untouched form sends no maintainer draft to the AI", {
+  client <- issue_size_test_client()
+  on.exit(client$cleanup(), add = TRUE)
+  client$click("_ai_btn")
+  client$generate()
+  expect_identical(client$draft_args$desc, "")
+  expect_false(grepl("Maintainer's draft", client$description_prompt, fixed = TRUE))
 })

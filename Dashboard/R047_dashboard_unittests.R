@@ -632,6 +632,54 @@ test_that("build_description_prompt with graph_caption anchors diagnosis on the 
   expect_true(grepl("NOT that the parliament was complete", prompt))
 })
 
+# --- maintainer draft notes passed to the LLM ---
+
+test_that("author_notes_block is empty without maintainer input", {
+  path <- "NL / RESE / check / full_overlap"
+  expect_identical(author_notes_block(NULL, NULL, path), "")
+  expect_identical(author_notes_block("", "   ", path), "")
+  # The title field is pre-filled with the issue path: that is not a draft.
+  expect_identical(author_notes_block(path, "", path), "")
+})
+
+test_that("author_notes_block carries the draft title and description", {
+  block <- author_notes_block(
+    "Two Jansens seated at once",
+    "Seen in the 1959 roster; both rows share a birth date.",
+    "NL / RESE / check / full_overlap")
+  expect_match(block, "Maintainer's draft", fixed = TRUE)
+  expect_match(block, "Draft title: Two Jansens seated at once", fixed = TRUE)
+  expect_match(block, "Draft description:\nSeen in the 1959 roster", fixed = TRUE)
+  # Description only: no title line
+  block <- author_notes_block("", "just a note", "NL / RESE / check / full_overlap")
+  expect_false(grepl("Draft title", block, fixed = TRUE))
+  expect_match(block, "just a note", fixed = TRUE)
+})
+
+test_that("prompt builders pass the maintainer's draft through to the model", {
+  path <- "NL / RESE / check / full_overlap"
+  note <- "I think the 1959 roster double-counts one person."
+  for (build in list(build_title_prompt, build_description_prompt,
+                     build_size_prompt)) {
+    with_notes <- build(path, "**Problem rows:** 3", user_desc = note)
+    without    <- build(path, "**Problem rows:** 3")
+    expect_match(with_notes, note, fixed = TRUE)
+    expect_false(grepl("Maintainer's draft", without, fixed = TRUE))
+  }
+})
+
+test_that("description prompt tells the model to build on the draft, not replace it", {
+  prompt <- build_description_prompt(
+    "NL / RESE / check / full_overlap", "**Problem rows:** 3",
+    user_desc = "Both rows share a birth date.")
+  expect_match(prompt, "do not contradict", fixed = TRUE)
+  expect_match(prompt, "build on their draft rather than replacing it", fixed = TRUE)
+  # The draft block comes after the technical details so the model reads the
+  # facts first (the instruction sentence above merely points at the block).
+  expect_true(regexpr("Technical details:", prompt, fixed = TRUE) <
+                regexpr("Maintainer's draft (typed", prompt, fixed = TRUE))
+})
+
 # --- issue_image_filename ---
 
 test_that("issue_image_filename produces valid filename with issue number", {

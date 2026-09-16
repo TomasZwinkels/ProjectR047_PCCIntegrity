@@ -904,11 +904,35 @@ codex_query <- function(prompt, model = codex_model, image = NULL) {
   })
 }
 
+# Draft text the maintainer typed into the issue form before pressing
+# "Generate title and description with AI". Formatted as a prompt block so the
+# model builds on the maintainer's notes instead of silently discarding them
+# (the generated text overwrites both form fields). Returns "" when there is
+# nothing to pass on: an empty description, and a title that is still the
+# auto-filled issue path rather than something the maintainer wrote.
+author_notes_block <- function(user_title = NULL, user_desc = NULL,
+                               issue_path_str = "") {
+  clean <- function(x) {
+    if (length(x) == 0 || is.na(x[1])) "" else trimws(as.character(x[1]))
+  }
+  title <- clean(user_title)
+  desc  <- clean(user_desc)
+  if (identical(title, trimws(issue_path_str))) title <- ""
+  if (!nzchar(title) && !nzchar(desc)) return("")
+  paste0(
+    "\n\nMaintainer's draft (typed into the issue form before generating):\n",
+    if (nzchar(title)) paste0("Draft title: ", title, "\n") else "",
+    if (nzchar(desc))  paste0("Draft description:\n", desc, "\n") else ""
+  )
+}
+
 # Build the prompt for generating a human-readable issue title.
 # The title must describe the observed symptom, not a suspected cause:
 # hypotheses in the summary are often refuted during investigation, and a
 # title naming the wrong culprit misleads whoever picks up the issue later.
-build_title_prompt <- function(issue_path_str, auto_summary) {
+build_title_prompt <- function(issue_path_str, auto_summary,
+                               user_title = NULL, user_desc = NULL) {
+  notes <- author_notes_block(user_title, user_desc, issue_path_str)
   paste0(
     "You are a data quality assistant for a parliamentary dataset ",
     "(the Political Careers In Comparison Project). ",
@@ -924,9 +948,15 @@ build_title_prompt <- function(issue_path_str, auto_summary) {
     "in Tweede Kamer' over 'Verify overlap between person A and ",
     "person B'. ",
     "Do NOT include quotes around the title. ",
+    if (nzchar(notes)) paste0(
+      "The maintainer's draft notes below say what they consider the point ",
+      "of this issue; let them steer the title's emphasis, within the rules ",
+      "above. "
+    ) else "",
     "Reply with only the title, nothing else.\n\n",
     "Issue path: ", issue_path_str, "\n\n",
-    "Technical details:\n", auto_summary
+    "Technical details:\n", auto_summary,
+    notes
   )
 }
 
@@ -940,7 +970,9 @@ build_title_prompt <- function(issue_path_str, auto_summary) {
 build_description_prompt <- function(issue_path_str, auto_summary,
                                      graph_caption = NULL,
                                      issue_size = "medium",
-                                     size_confirmed = FALSE) {
+                                     size_confirmed = FALSE,
+                                     user_title = NULL, user_desc = NULL) {
+  notes <- author_notes_block(user_title, user_desc, issue_path_str)
   graph_part <- if (!is.null(graph_caption)) {
     paste0(
       "Attached is an image of the dashboard graph (", graph_caption, "). ",
@@ -978,15 +1010,25 @@ build_description_prompt <- function(issue_path_str, auto_summary,
     "Always refer to politicians by their full pers_id ",
     "(e.g. 'NL_Aartsen_Thierry_1989'), not by name alone. ",
     "Use markdown formatting. ",
+    if (nzchar(notes)) paste0(
+      "The maintainer has already drafted notes for this issue (see ",
+      "'Maintainer's draft' below). Treat them as authoritative context: ",
+      "incorporate every fact and observation they state, do not contradict ",
+      "them, keep their wording where it is already clear, and build on ",
+      "their draft rather than replacing it. "
+    ) else "",
     "Reply with only the description, nothing else.\n\n",
     "Issue path: ", issue_path_str, "\n\n",
-    "Technical details:\n", auto_summary
+    "Technical details:\n", auto_summary,
+    notes
   )
 }
 
 # Ask the model for a provisional size suggestion. The dashboard displays this
 # separately; the user must still confirm the actual selector value.
-build_size_prompt <- function(issue_path_str, auto_summary) {
+build_size_prompt <- function(issue_path_str, auto_summary,
+                              user_title = NULL, user_desc = NULL) {
+  notes <- author_notes_block(user_title, user_desc, issue_path_str)
   paste0(
     "You are helping triage a data-quality issue in the Political Careers ",
     "In Comparison Project. Suggest exactly one issue-size label based on ",
@@ -997,9 +1039,14 @@ build_size_prompt <- function(issue_path_str, auto_summary) {
     "large = more than roughly 500 data points, broad structural impact, or ",
     "substantial source/pipeline work. Existing-source coverage can make a ",
     "large issue easier to script, but does not change its size. ",
+    if (nzchar(notes)) paste0(
+      "The maintainer's draft notes below may indicate the expected scope ",
+      "of the fix; take them into account. "
+    ) else "",
     "Reply with exactly one token: small, medium, or large. Do not explain.\n\n",
     "Issue path: ", issue_path_str, "\n\n",
-    "Technical details:\n", auto_summary
+    "Technical details:\n", auto_summary,
+    notes
   )
 }
 
@@ -1009,9 +1056,11 @@ normalize_llm_issue_size <- function(result) {
   normalize_issue_size(token, fallback = "medium")
 }
 
-llm_suggest_issue_size <- function(issue_path_str, auto_summary) {
+llm_suggest_issue_size <- function(issue_path_str, auto_summary,
+                                   user_title = NULL, user_desc = NULL) {
   normalize_llm_issue_size(codex_query(
-    build_size_prompt(issue_path_str, auto_summary)
+    build_size_prompt(issue_path_str, auto_summary,
+                      user_title = user_title, user_desc = user_desc)
   ))
 }
 
@@ -1029,10 +1078,14 @@ normalize_llm_title <- function(result, fallback) {
 }
 
 # Generate a human-readable title via LLM.
+# user_title/user_desc: the maintainer's draft form fields (see
+# author_notes_block()); they steer the title but the symptom-only rule holds.
 # Returns the normalized LLM title, or the original path as fallback.
-llm_generate_title <- function(issue_path_str, auto_summary) {
+llm_generate_title <- function(issue_path_str, auto_summary,
+                               user_title = NULL, user_desc = NULL) {
   result <- codex_query(
-    build_title_prompt(issue_path_str, auto_summary)
+    build_title_prompt(issue_path_str, auto_summary,
+                       user_title = user_title, user_desc = user_desc)
   )
   normalize_llm_title(result, issue_path_str)
 }
@@ -1041,16 +1094,20 @@ llm_generate_title <- function(issue_path_str, auto_summary) {
 # image/graph_caption: optional PNG of the dashboard graph shown above the
 # issue form; when given, the image is attached to the Codex call and the
 # prompt tells the model to base its diagnosis on the graph.
+# user_title/user_desc: the maintainer's draft form fields (see
+# author_notes_block()); the model is told to build on them, not replace them.
 # Returns the LLM description, or empty string as fallback.
 llm_generate_description <- function(issue_path_str, auto_summary,
                                      image = NULL, graph_caption = NULL,
                                      issue_size = "medium",
-                                     size_confirmed = FALSE) {
+                                     size_confirmed = FALSE,
+                                     user_title = NULL, user_desc = NULL) {
   result <- codex_query(
     build_description_prompt(issue_path_str, auto_summary,
                              graph_caption = graph_caption,
                              issue_size = issue_size,
-                             size_confirmed = size_confirmed),
+                             size_confirmed = size_confirmed,
+                             user_title = user_title, user_desc = user_desc),
     image = image
   )
   if (is.null(result) || nchar(result) == 0 ||

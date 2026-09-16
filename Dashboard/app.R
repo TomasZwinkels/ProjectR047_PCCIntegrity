@@ -356,7 +356,7 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
         id = paste0(form_id, "_text"),
         rows = "4",
         style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.9em;",
-        placeholder = "Describe the issue..."
+        placeholder = "Describe the issue... (notes typed here are passed to the AI generator, which builds on them)"
       ),
       tags$label("Technical details:", style = "font-weight:bold; display:block; margin-top:8px; margin-bottom:4px; color:#666;"),
       tags$textarea(
@@ -441,6 +441,8 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "auto_summary: document.getElementById('%s').value, ",
               "title_id: '%s_title', ",
               "desc_id: '%s_text', ",
+              "user_title: document.getElementById('%s_title').value, ",
+              "user_desc: document.getElementById('%s_text').value, ",
               "plot_key: '%s', ",
               "issue_size: document.getElementById('%s').value, ",
               "size_confirmed: document.getElementById('%s').checked, ",
@@ -451,6 +453,7 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "nonce: Math.random()});"
             ),
             size_id, size_confirmed_id, path_js, auto_id, form_id, form_id,
+            form_id, form_id,
             if (is.null(plot_key)) "" else plot_key, size_id,
             size_confirmed_id,
             size_id, size_confirmed_id, size_suggestion_id
@@ -970,6 +973,11 @@ server <- function(input, output, session) {
     btn_id   <- info$btn_id
     issue_size <- normalize_issue_size(info$issue_size)
     size_confirmed <- isTRUE(info$size_confirmed)
+    # Draft text already in the Title/Description fields: passed to every
+    # prompt so the model builds on the maintainer's notes instead of
+    # discarding them (the generated text overwrites both fields).
+    user_title <- if (is.null(info$user_title)) "" else info$user_title
+    user_desc  <- if (is.null(info$user_desc))  "" else info$user_desc
     on.exit(
       session$sendCustomMessage(
         "resetButton",
@@ -999,9 +1007,12 @@ server <- function(input, output, session) {
     }
 
     withProgress(message = "Generating with AI...", value = 0.3, {
-      title <- llm_generate_title(path, auto_summary)
+      title <- llm_generate_title(path, auto_summary,
+                                  user_title = user_title, user_desc = user_desc)
       setProgress(0.5, detail = "Suggesting issue size...")
-      suggested_size <- llm_suggest_issue_size(path, auto_summary)
+      suggested_size <- llm_suggest_issue_size(path, auto_summary,
+                                               user_title = user_title,
+                                               user_desc = user_desc)
       # Size controls are locked during generation, so the description and
       # the selector use the same choice. AI cannot replace a confirmed size.
       if (!size_confirmed) issue_size <- suggested_size
@@ -1020,7 +1031,9 @@ server <- function(input, output, session) {
                                         image = img_path,
                                         graph_caption = img_capt,
                                         issue_size = issue_size,
-                                        size_confirmed = size_confirmed)
+                                        size_confirmed = size_confirmed,
+                                        user_title = user_title,
+                                        user_desc = user_desc)
     })
     # Push results back into the form fields via JS
     session$sendCustomMessage("fillField", list(id = title_id, value = title))
