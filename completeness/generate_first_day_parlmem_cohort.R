@@ -85,8 +85,8 @@ PARL <- read.csv("/home/tomas/projects/PCCdata/PARL.csv", header = TRUE, sep = "
 RESE <- RESE[which(RESE$country_abb == country_code), ]
 PARL <- PARL[which(PARL$country_abb == country_code), ]
 
-# Filter to parliamentary membership episodes
-RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")), ]
+# Filter to voting parliamentary membership episodes (positions 01 and 09)
+RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")), ]
 
 # Filter PARL to correct assembly per country (national lower house)
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR", SJ = "SA")

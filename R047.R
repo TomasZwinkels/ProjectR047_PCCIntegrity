@@ -79,6 +79,10 @@ resebeforepotentialresentryfilter <- nrow(RESE)
 RESE <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")),]
 reseafterpotentialresentryfilter <- nrow(RESE)
 
+# Keep nonvoting records in generic integrity checks; count only voting members
+# in membership/faction coverage, matching PARL voting-seat sizes.
+RESE_voting <- RESE[which(RESE$political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")), ]
+
 cat("Further rese filtering details:\n")
 cat(ifelse(resebeforepotentialresentryfilter == reseafterpotentialresentryfilter,
            "- NO filter applied\n",
@@ -145,7 +149,7 @@ verified_not_duplicates <- data.frame(
 )
 assembly_map <- c(CA = "HC", CH = "NR", DE = "BT", NL = "TK", NO = "ST", US = "HR")
 birthdate_dup_check <- !check_RESE_duplicate_birthdates_in_faction(
-  RESE, POLI, PARL, MEME, assembly_map[country_code],
+  RESE_voting, POLI, PARL, MEME, assembly_map[country_code],
   verified_pairs = verified_not_duplicates)
 cat("No same-birthday duplicates in factions:", ifelse(birthdate_dup_check, "✅ PASS", "❌ FAIL"), "\n")
 
@@ -187,20 +191,20 @@ cat("All MPs have party membership data:", ifelse(meme_party_coverage_check, "�
 
 # 16. Parliamentary membership data coverage across date range
 parlmem_coverage_check <- check_RESE_parlmem_coverage(
-  RESE, PARL, assembly_map[country_code], date_from, date_to)
+  RESE_voting, PARL, assembly_map[country_code], date_from, date_to)
 cat("All parliaments in date range have membership data:",
     ifelse(parlmem_coverage_check, "✅ PASS", "❌ FAIL"), "\n")
 if (!parlmem_coverage_check) {
   det <- check_RESE_parlmem_coverage_details(
-    RESE, PARL, assembly_map[country_code], date_from, date_to)
+    RESE_voting, PARL, assembly_map[country_code], date_from, date_to)
   cat("  Parliaments with no data:", det$gap_count, "of", det$parliaments_checked, "\n")
   cat("  Parliament IDs missing data:",
       paste(det$parliaments_no_data$parliament_id, collapse = ", "), "\n")
 }
 
 # 17. RESE coverage on date_from (catches parliament active before range start)
-coverage_datefrom_check <- check_RESE_coverage_at_date(RESE, date_from)
-cat(paste0("\u22651 seated MP in RESE on date_from (", format(date_from, "%Y-%m-%d"), "):"),
+coverage_datefrom_check <- check_RESE_coverage_at_date(RESE_voting, date_from)
+cat(paste0("\u22651 voting MP in RESE on date_from (", format(date_from, "%Y-%m-%d"), "):"),
     ifelse(coverage_datefrom_check, "✅ PASS", "❌ FAIL"), "\n")
 if (!coverage_datefrom_check) {
   cat("  No parliamentary membership entries found active on", format(date_from, "%Y-%m-%d"), "\n")
@@ -208,8 +212,8 @@ if (!coverage_datefrom_check) {
 }
 
 # 18. RESE coverage on date_to (catches gap at end of range)
-coverage_dateto_check <- check_RESE_coverage_at_date(RESE, date_to)
-cat(paste0("\u22651 seated MP in RESE on date_to (", format(date_to, "%Y-%m-%d"), "):"),
+coverage_dateto_check <- check_RESE_coverage_at_date(RESE_voting, date_to)
+cat(paste0("\u22651 voting MP in RESE on date_to (", format(date_to, "%Y-%m-%d"), "):"),
     ifelse(coverage_dateto_check, "✅ PASS", "❌ FAIL"), "\n")
 if (!coverage_dateto_check) {
   cat("  No parliamentary membership entries found active on", format(date_to, "%Y-%m-%d"), "\n")

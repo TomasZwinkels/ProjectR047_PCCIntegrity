@@ -67,7 +67,7 @@ build_cohort <- function(country_code) {
   rese <- RESE |>
     filter(
       country_abb == country_code,
-      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
+      political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
     )
 
   parl <- PARL |>
@@ -105,13 +105,13 @@ build_cohort <- function(country_code) {
   do.call(rbind, Filter(Negate(is.null), cohort_list))
 }
 
-# Day-by-day seated MP counts for a country (full data range, cached to disk)
+# Day-by-day voting MP counts for a country (full data range, cached to disk)
 cache_dir <- "/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/cache"
 
 build_daily_counts <- function(cc) {
   rese_cc <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
   parl_cc <- PARL[PARL$country_abb == cc & PARL$level == "NT" &
                     PARL$assembly_abb == assembly_map[[cc]], ]
   parl_cc <- parl_cc[order(parl_cc$leg_period_start_date), ]
@@ -134,7 +134,7 @@ build_daily_counts <- function(cc) {
   }, integer(1))
 
   # Build the daily parliament_size, honouring ';'-separated fluctuating sizes
-  # (e.g. DE_NT-BT_1987 "519;663") by expanding each term into sub-periods at
+  # (e.g. DE_NT-BT_1987 "497;519;663") by expanding each term into sub-periods at
   # its manually-registered changeover date(s). parse_parliament_size_series()
   # stops with an actionable error if a required changeover date is missing.
   parliament_size <- rep(NA_integer_, length(date_seq))
@@ -157,8 +157,9 @@ build_daily_counts <- function(cc) {
 get_daily_counts <- function(cc, force = FALSE) {
   cache_rds <- file.path(cache_dir, paste0("daily_counts_", cc, ".rds"))
   cache_ver <- file.path(cache_dir, paste0("daily_counts_", cc, "_version.txt"))
-  data_version <- trimws(readLines(
-    "/home/tomas/projects/PCCdata/dataversion.txt")[1])
+  # Changing the counted population must invalidate old all-seat caches.
+  data_version <- paste0(trimws(readLines(
+    "/home/tomas/projects/PCCdata/dataversion.txt")[1]), "|voting-members-v1")
 
   if (!force && file.exists(cache_rds) && file.exists(cache_ver) &&
       trimws(readLines(cache_ver)[1]) == data_version) {
@@ -192,11 +193,14 @@ checks_table <- function(labels, results) {
 }
 
 run_rese_checks <- function(cc, date_from, date_to) {
-  rese_mp <- suppressMessages(preprocess_RESEdates(
+  rese_records <- suppressMessages(preprocess_RESEdates(
     RESE[RESE$country_abb == cc, ]
   ))
-  rese_mp <- rese_mp[rese_mp$political_function %in%
-                       c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
+  # Nonvoting parliamentary records still receive identity/date/overlap checks.
+  # Membership coverage uses only the voting population below.
+  rese_records <- rese_records[rese_records$political_function %in%
+                                 parliamentary_record_pf_codes, ]
+  rese_mp <- rese_mp_rows(rese_records, cc)
 
   labels <- c(
     "All RESE person IDs exist in POLI",
@@ -207,25 +211,25 @@ run_rese_checks <- function(cc, date_from, date_to) {
     "No same-birthday duplicates in factions",
     "Parliament IDs consistent with episode start/end dates",
     "All parliaments in date range have membership data",
-    paste0("\u22651 seated MP in RESE on date_from (", format(date_from, "%Y-%m-%d"),
+    paste0("\u22651 voting MP in RESE on date_from (", format(date_from, "%Y-%m-%d"),
            ") \u2014 detects gap from parliament active before range start"),
-    paste0("\u22651 seated MP in RESE on date_to (", format(date_to, "%Y-%m-%d"),
+    paste0("\u22651 voting MP in RESE on date_to (", format(date_to, "%Y-%m-%d"),
            ") \u2014 detects gap from parliament active at range end"),
     "No special (non-ASCII) characters in text fields",
-    "All MP episodes have a pers_id",
+    "All parliamentary episodes have a pers_id",
     "No leading/trailing whitespace in resume entry IDs",
     "Resume entry ID names the same person as pers_id"
   )
   details <- list(
-    check_RESE_persid_in_POLI_details(rese_mp, POLI),
-    check_RESE_resentryid_unique_details(rese_mp),
-    check_anyNAinRESEdates_details(rese_mp),
-    check_RESE_parlmemeppisodes_anyfulloverlap_details(rese_mp),
-    check_RESE_anynear_fulloverlap_details(rese_mp, tolerance_days = 2),
+    check_RESE_persid_in_POLI_details(rese_records, POLI),
+    check_RESE_resentryid_unique_details(rese_records),
+    check_anyNAinRESEdates_details(rese_records),
+    check_RESE_parlmemeppisodes_anyfulloverlap_details(rese_records),
+    check_RESE_anynear_fulloverlap_details(rese_records, tolerance_days = 2),
     check_RESE_duplicate_birthdates_in_faction_details(
       rese_mp, POLI, PARL, MEME, assembly_map[[cc]],
       verified_pairs = verified_not_duplicates),
-    check_RESE_parliament_id_matches_dates_details(rese_mp, PARL),
+    check_RESE_parliament_id_matches_dates_details(rese_records, PARL),
     check_RESE_parlmem_coverage_details(
       rese_mp, PARL, assembly_map[[cc]], date_from, date_to),
     check_RESE_coverage_at_date_details(rese_mp, date_from),
@@ -233,13 +237,11 @@ run_rese_checks <- function(cc, date_from, date_to) {
     # Scan the FULL country RESE table (not just MP episodes) for non-ASCII text.
     check_special_chars_details(RESE[RESE$country_abb == cc, ],
                                 id_cols = c("res_entry_id", "pers_id")),
-    # Row/id integrity (issues #39/#40/#41), scoped to the MP frame like every
-    # other check on this tab: RESE_MP can pass while non-MP rows elsewhere in
-    # RESE are still broken. The same check functions will later back a
-    # dedicated whole-RESE tab that scans every row.
-    check_RESE_persid_present_details(rese_mp),
-    check_RESE_resentryid_no_whitespace_details(rese_mp),
-    check_RESE_id_matches_persid_details(rese_mp)
+    # Row/id integrity also covers retained nonvoting parliamentary records.
+    # Other non-parliamentary RESE rows remain outside these checks.
+    check_RESE_persid_present_details(rese_records),
+    check_RESE_resentryid_no_whitespace_details(rese_records),
+    check_RESE_id_matches_persid_details(rese_records)
   )
   list(
     table   = checks_table(labels, sapply(details, `[[`, "check_passed")),
@@ -550,7 +552,7 @@ run_meme_checks <- function(cc, date_from, date_to) {
   ))
   rese_mp <- RESE[RESE$country_abb == cc &
                     RESE$political_function %in%
-                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"), ]
+                      c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09"), ]
   # For check #7 (party coverage): only MPs active within the date range
   rese_mp_in_range <- rese_mp[
     rese_mp$start_date <= date_to &
@@ -815,7 +817,7 @@ ui <- fluidPage(
       uiOutput("rese_detail"),
       tags$hr(),
       fluidRow(
-        column(10, tags$h5("Daily seated MPs (RESE) vs. official parliament size (PARL)")),
+        column(10, tags$h5("Daily voting MPs (RESE) vs. voting-seat capacity (PARL)")),
         column(2,  actionButton("recompute_daily", "Recompute", class = "btn-sm btn-default",
                                  style = "float:right; margin-top:4px;"))
       ),
@@ -1502,7 +1504,7 @@ server <- function(input, output, session) {
     ctx <- list(
       POLI = POLI, RESE = RESE, PARL = PARL,
       mp_codes = c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
-                   "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"),
+                   "NT_LE_T3_NA_09"),
       period_start = ps,
       period_end   = pe,
       assembly_map = assembly_map,
@@ -1610,8 +1612,8 @@ server <- function(input, output, session) {
                    limits = c(input$date_range[1], input$date_range[2])) +
       scale_y_continuous(name = "MPs (count)") +
       labs(
-        title    = paste0("Daily seated MPs \u2014 ", country_name),
-        subtitle = paste0("Blue: actual seated MPs (RESE)   Grey step: official parliament size (PARL)   Red: overcount",
+        title    = paste0("Daily voting MPs \u2014 ", country_name),
+        subtitle = paste0("Blue: voting MPs present (RESE)   Grey step: voting-seat capacity (PARL)   Red: overcount",
                           if (!is.null(bands)) "   Orange band: structurally undercounted legislature" else "")
       ) +
       theme_minimal(base_size = 13) +
@@ -1737,7 +1739,7 @@ server <- function(input, output, session) {
     cc <- info$country
     RESE[RESE$country_abb == cc &
            RESE$political_function %in%
-             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11") &
+             c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09") &
            !is.na(RESE$end_date) &
            RESE$end_date == ep$end_date, ]
   })
@@ -1841,7 +1843,7 @@ server <- function(input, output, session) {
                " (", ep$duration_days, " days)")
       ),
       tags$p(
-        paste0("Official parliament size: ", ep$parliament_size,
+        paste0("Voting-seat capacity: ", ep$parliament_size,
                "  |  Peak excess: +", ep$peak_excess,
                "  |  Mean excess: +", ep$mean_excess)
       ),
@@ -1887,7 +1889,7 @@ server <- function(input, output, session) {
             "Candidates for a persistent overcount – watch stray open-ended records."),
           if (nrow(sets$peak) > 0) tags$p(
             style = "margin-top:12px;",
-            tags$b(sprintf("Peak-day roster: %d seated vs %d official on %s.",
+            tags$b(sprintf("Peak-day roster: %d voting members vs %d voting seats on %s.",
                            nrow(sets$peak), ep$parliament_size,
                            format_pcc_date(ep$peak_date))),
             tags$span(style = "color:#666;", " Full roster in the attached peak CSV.")),
@@ -2129,7 +2131,7 @@ server <- function(input, output, session) {
     RESE |>
       filter(
         country_abb == input$country_select,
-        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
+        political_function %in% c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
       ) |>
       pull(pers_id) |>
       unique()
@@ -2395,7 +2397,7 @@ server <- function(input, output, session) {
   )
   issue_plot_captions <- c(
     poli_completeness = "Completeness over time",
-    rese_daily        = "Daily seated MPs vs official parliament size"
+    rese_daily        = "Daily voting MPs vs voting-seat capacity"
   )
 
   output$poli_missing_header <- renderUI({

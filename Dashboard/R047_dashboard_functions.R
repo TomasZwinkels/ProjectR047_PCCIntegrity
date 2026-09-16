@@ -183,11 +183,15 @@ detail_default_cols_map <- list(
 overcount_default_cols <- c("res_entry_id", "pers_id", "res_entry_start",
                             "res_entry_end", "political_function", "parliament_id")
 
-# The RESE political_function codes counted as parliamentary membership.
-# Kept in one place so every over/undercount-detail set matches
-# build_daily_counts() (which must use the same seated-member codes).
-mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09",
-                 "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11")
+# Membership totals use voting members in every country: regular members (01)
+# and seated deputies/serving substitutes (09). Position 11 remains in RESE,
+# but is excluded from totals, cohorts, coverage and their detail rosters.
+# Keep these codes aligned with build_daily_counts() and the standalone scripts.
+mp_pf_codes <- c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01", "NT_LE_T3_NA_09")
+
+# Generic parliamentary record checks still include nonvoting members.
+parliamentary_record_pf_codes <- c(mp_pf_codes, "NT_LE_T3_NA_11",
+                                   "NT_LE-LH_T3_NA_11")
 
 # Columns shown in the overcount context tables/CSVs (opening, peak roster,
 # present-throughout). Wider than overcount_default_cols: adds name + birth_date
@@ -435,7 +439,7 @@ build_overcount_summary <- function(ep, rese_ending,
   lines <- c(
     paste0("**Episode:** ", format_pcc_date(ep$start_date), " -- ",
            format_pcc_date(ep$end_date), " (", ep$duration_days, " days)"),
-    paste0("**Official parliament size:** ", ep$parliament_size),
+    paste0("**Voting-seat capacity:** ", ep$parliament_size),
     paste0("**Peak excess:** +", ep$peak_excess,
            "  |  Mean excess: +", ep$mean_excess,
            if (!is.null(ep$peak_date) && !is.na(ep$peak_date))
@@ -469,7 +473,7 @@ build_overcount_summary <- function(ep, rese_ending,
   if (!is.null(peak_roster) && nrow(peak_roster) > 0) {
     lines <- c(lines, "",
                paste0("**Peak-day roster:** ", nrow(peak_roster),
-                      " seated vs ", ep$parliament_size, " official on ",
+                      " voting members vs ", ep$parliament_size, " voting seats on ",
                       format_pcc_date(ep$peak_date),
                       " (full roster in the attached peak CSV)."))
   }
@@ -635,8 +639,8 @@ build_undercount_summary <- function(leg, thresholds, runs,
                "", df_to_md_table(arrival))
   }
   lines <- c(lines, "",
-             paste0("_Interpretation: an undercount means fewer seated MPs in ",
-                    "RESE than the official parliament size in PARL. Unlike ",
+             paste0("_Interpretation: an undercount means fewer voting MPs in ",
+                    "RESE than the voting-seat capacity in PARL. Unlike ",
                     "overcounts, small undercounts can be real (seats vacant ",
                     "until by-elections); this legislature exceeds the ",
                     "country's own vacancy floor. Likely error classes -- ",

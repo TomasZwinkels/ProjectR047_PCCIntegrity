@@ -345,14 +345,24 @@ test_that("parse_parliament_size_series returns one row for a single value", {
   expect_equal(res$seg_end,   as.Date("1983-03-28"))
 })
 
-test_that("parse_parliament_size_series splits at the registered changeover date", {
+test_that("German voting size changes at voting rights and reunification", {
   res <- parse_parliament_size_series("DE_NT-BT_1987",
-           as.Date("1987-02-18"), as.Date("1990-12-19"), "519;663")
-  expect_equal(nrow(res), 2)
-  expect_equal(res$size, c(519L, 663L))
-  # midnight rule: first segment ends the day before the changeover
-  expect_equal(res$seg_end[1],   as.Date("1990-10-02"))
-  expect_equal(res$seg_start[2], as.Date("1990-10-03"))
+           as.Date("1987-02-18"), as.Date("1990-12-19"), "497;519;663")
+  expect_equal(res$size, c(497L, 519L, 663L))
+  expect_equal(res$seg_start, as.Date(c("1987-02-18", "1990-06-21", "1990-10-03")))
+  expect_equal(res$seg_end, as.Date(c("1990-06-20", "1990-10-02", "1990-12-19")))
+})
+
+test_that("German voting size ignores Berlin growth but retains Saarland accession", {
+  first <- parse_parliament_size_series("DE_NT-BT_1949",
+           as.Date("1949-09-07"), as.Date("1953-10-05"), "402")
+  expect_equal(first$size, 402L)
+  expect_null(SIZE_CHANGE_DATES[["DE_NT-BT_1949"]])
+  saar <- parse_parliament_size_series("DE_NT-BT_1953",
+           as.Date("1953-10-06"), as.Date("1957-10-14"), "487;497")
+  expect_equal(saar$size, c(487L, 497L))
+  expect_equal(saar$seg_start[2], as.Date("1957-01-04"))
+  expect_equal(saar$seg_end[1], as.Date("1957-01-03"))
 })
 
 test_that("NL 1945 size is 76 through 19nov and 100 from 20nov", {

@@ -2,6 +2,24 @@
 
 A comprehensive R script for validating and analyzing data integrity in the Political Career Codebook (PCC) dataset, with specialized tools for detecting overlapping political episodes and suspicious date patterns.
 
+## Membership population
+
+Membership totals, first-day cohorts, coverage checks, party-coverage checks and
+their diagnostic rosters use **voting members in every country**. The existing
+regular-member (`01`) and seated-deputy/serving-substitute (`09`) codes remain
+included. Nonvoting members (`11`), including U.S. House delegates and historical
+West Berlin deputies, remain in RESE and in generic parliamentary record checks
+for IDs, dates and overlaps, but are excluded from the counted population.
+
+PARL `parliament_size` must describe the corresponding voting seats. Import the
+coordinated U.S. and German PARL corrections and the German RESE status fixes
+before interpreting comparisons against an older central snapshot. The German
+fixes distinguish nonvoting service from full voting rights beginning on
+21 June 1990. Semicolon-separated sizes still represent
+successive dated voting-seat capacities; ordinary vacancies remain deficits.
+Daily-count caches include a population-policy version, so older all-seat counts
+are recomputed even when the central data version has not changed.
+
 ## 📊 What This Does
 
 This project provides:

@@ -813,17 +813,17 @@ daily_size_for <- function(parl_cc, date_seq) {
   out
 }
 
-test_that("daily size steps 519 -> 663 across the registered changeover date", {
+test_that("daily German voting size follows both 1990 changes", {
   parl_cc <- data.frame(
     parliament_id   = "DE_NT-BT_1987",
     leg_start       = as.Date("1987-02-18"),
     leg_end         = as.Date("1990-12-19"),
-    parliament_size = "519;663",
+    parliament_size = "497;519;663",
     stringsAsFactors = FALSE
   )
-  days <- as.Date(c("1990-10-01", "1990-10-02", "1990-10-03", "1990-12-19"))
+  days <- as.Date(c("1990-06-20", "1990-06-21", "1990-10-02", "1990-10-03", "1990-12-19"))
   sizes <- daily_size_for(parl_cc, days)
-  expect_equal(sizes, c(519L, 519L, 663L, 663L))
+  expect_equal(sizes, c(497L, 519L, 519L, 663L, 663L))
 })
 
 test_that("daily NL 1945 size steps 76 -> 100 on 20 November", {
@@ -854,9 +854,9 @@ test_that("daily size build stops when a fluctuating term lacks its changeover d
 
 # --- structural-undercount drill-down helpers ---
 
-test_that("mp_pf_codes carries all seated MP codes used by build_daily_counts", {
+test_that("mp_pf_codes carries voting MP codes used by build_daily_counts", {
   expect_setequal(mp_pf_codes, c("NT_LE-LH_T3_NA_01", "NT_LE_T3_NA_01",
-                                 "NT_LE_T3_NA_09", "NT_LE_T3_NA_11", "NT_LE-LH_T3_NA_11"))
+                                 "NT_LE_T3_NA_09"))
 })
 
 test_that("undercount_runs localizes contiguous above-threshold stretches", {
