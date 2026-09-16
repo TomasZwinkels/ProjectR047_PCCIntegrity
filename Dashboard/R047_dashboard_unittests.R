@@ -8,6 +8,67 @@ source("/home/tomas/projects/ProjectR047_PCCIntegrity/Dashboard/R047_dashboard_f
 
 library(testthat)
 
+# --- Codex title generation helpers ---
+
+test_that("dashboard Codex calls are pinned to Astra", {
+  expect_identical(codex_model, "gpt-6-astra")
+})
+
+test_that("normalize_llm_title keeps the first clean line under 80 characters", {
+  expect_identical(
+    normalize_llm_title("## \"A clean title\"\nExtra model commentary", "fallback"),
+    "A clean title"
+  )
+  expect_identical(normalize_llm_title(strrep("x", 81), "fallback"), "fallback")
+  expect_identical(normalize_llm_title(NULL, "fallback"), "fallback")
+})
+
+test_that("issue sizes normalize to the supported values", {
+  expect_identical(normalize_issue_size(" Medium "), "medium")
+  expect_identical(normalize_issue_size("not-a-size"), "medium")
+  expect_identical(normalize_issue_size(NA_character_), "medium")
+  expect_identical(issue_size_label("large"), "size:large")
+})
+
+test_that("issue labels preserve path labels and append one size label", {
+  expect_equal(
+    issue_labels("NL / POLI / completeness / birth_date", "medium"),
+    c("NL", "POLI", "completeness", "birth_date", "size:medium")
+  )
+  expect_equal(
+    issue_labels("NL / POLI / completeness / birth_date", "invalid"),
+    c("NL", "POLI", "completeness", "birth_date", "size:medium")
+  )
+})
+
+test_that("invalid LLM size suggestions fall back to medium", {
+  expect_identical(normalize_llm_issue_size("small"), "small")
+  expect_identical(normalize_llm_issue_size("not-a-size"), "medium")
+  expect_identical(normalize_llm_issue_size(NULL), "medium")
+})
+
+test_that("size prompt defines scope classification and excludes severity", {
+  prompt <- build_size_prompt("NL / POLI / completeness / birth_date", "42 rows")
+  expect_match(prompt, "small = up to 25 data points")
+  expect_match(prompt, "medium = roughly 26-500 data points")
+  expect_match(prompt, "large = more than roughly 500 data points")
+  expect_match(prompt, "not the severity")
+})
+
+test_that("description prompt preserves the confirmed size", {
+  prompt <- build_description_prompt("NL / POLI / check / fake", "summary",
+                                     issue_size = "large", size_confirmed = TRUE)
+  expect_match(prompt, "maintainer-confirmed issue-size classification is `large`")
+})
+
+test_that("description prompt treats unconfirmed sizes as provisional", {
+  prompt <- build_description_prompt("NL / POLI / check / fake", "summary",
+                                     issue_size = "large")
+  expect_match(prompt, "provisional issue-size suggestion is `large`")
+  expect_false(grepl("maintainer-confirmed issue-size classification", prompt))
+  expect_match(prompt, "dashboard appends the final confirmed size when posting")
+})
+
 # --- write_pcc_csv ---
 
 test_that("write_pcc_csv round-trips values via read_csv_with_excel_sep()", {

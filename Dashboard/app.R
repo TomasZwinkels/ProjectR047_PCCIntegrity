@@ -267,6 +267,9 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
   path_js <- gsub("'", "\\\\'", path)
   settings_id <- paste0(form_id, "_settings")
   auto_id <- paste0(form_id, "_auto")
+  size_id <- paste0(form_id, "_size")
+  size_suggestion_id <- paste0(form_id, "_size_suggestion")
+  size_confirmed_id <- paste0(form_id, "_size_confirmed")
 
   # table_key may be a single registry key (historical: one CSV, no filename
   # suffix) or a NAMED vector where names are per-file suffixes and values are
@@ -362,6 +365,38 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
         auto_summary,
         style = "width:100%; padding:6px; border:1px solid #ccc; border-radius:3px; font-size:0.85em; font-family:monospace; background:#f9f9f9; color:#444;"
       ),
+      tags$label("Issue size:", style = "font-weight:bold; display:block; margin-top:8px; margin-bottom:4px;"),
+      tags$select(
+        id = size_id,
+        class = "form-control input-sm",
+        style = "max-width:220px; margin-bottom:3px;",
+        onchange = sprintf(
+          "document.getElementById('%s').checked = false;", size_confirmed_id
+        ),
+        lapply(issue_size_values, function(value) {
+          tags$option(
+            value = value,
+            switch(value,
+                   small = "Small",
+                   medium = "Medium",
+                   large = "Large")
+          )
+        })
+      ),
+      tags$label(
+        style = "font-size:0.9em; cursor:pointer; display:block; margin-bottom:3px;",
+        tags$input(
+          type = "checkbox",
+          id = size_confirmed_id,
+          style = "margin-right:5px;"
+        ),
+        "User confirmed"
+      ),
+      tags$div(
+        id = size_suggestion_id,
+        style = "font-size:0.85em; color:#666; margin-bottom:6px;",
+        "AI suggestion: not generated. Select a size and confirm it."
+      ),
       if (!is.null(plot_key)) tags$div(
         style = "margin-top:6px;",
         tags$label(
@@ -399,17 +434,26 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
           onclick = sprintf(
             paste0(
               "this.disabled = true; this.innerText = 'Generating...'; ",
+              "document.getElementById('%s').disabled = true; ",
+              "document.getElementById('%s').disabled = true; ",
               "Shiny.setInputValue('llm_generate', {",
               "path: '%s', ",
               "auto_summary: document.getElementById('%s').value, ",
               "title_id: '%s_title', ",
               "desc_id: '%s_text', ",
               "plot_key: '%s', ",
+              "issue_size: document.getElementById('%s').value, ",
+              "size_confirmed: document.getElementById('%s').checked, ",
+              "size_id: '%s', ",
+              "size_confirmed_id: '%s', ",
+              "size_suggestion_id: '%s', ",
               "btn_id: this.id, ",
               "nonce: Math.random()});"
             ),
-            path_js, auto_id, form_id, form_id,
-            if (is.null(plot_key)) "" else plot_key
+            size_id, size_confirmed_id, path_js, auto_id, form_id, form_id,
+            if (is.null(plot_key)) "" else plot_key, size_id,
+            size_confirmed_id,
+            size_id, size_confirmed_id, size_suggestion_id
           ),
           id = paste0(form_id, "_ai_btn")
         ),
@@ -425,6 +469,8 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "'\\n\\n---\\n\\n' + document.getElementById('%s').value, ",
               "repo: document.getElementById('%s_repo').value, ",
               "asset_repo: document.getElementById('%s_asset_repo').value, ",
+              "issue_size: document.getElementById('%s').value, ",
+              "size_confirmed: document.getElementById('%s').checked, ",
               "has_plot: (function(){ var cb = document.getElementById('%s_attach_plot'); return cb ? cb.checked : false; })(), ",
               "plot_key: '%s', ",
               "table_keys: '%s', ",
@@ -432,6 +478,7 @@ issue_path_tag <- function(path, auto_summary = "", plot_key = NULL,
               "nonce: Math.random()});"
             ),
             path_js, form_id, form_id, auto_id, settings_id, settings_id,
+            size_id, size_confirmed_id,
             form_id, if (is.null(plot_key)) "" else plot_key,
             table_specs, form_id
           ),
@@ -667,9 +714,23 @@ ui <- fluidPage(
       var el = document.getElementById(msg.id);
       if (el) el.value = msg.value;
     });
+    Shiny.addCustomMessageHandler('setIssueSizeSuggestion', function(msg) {
+      var text = document.getElementById(msg.text_id);
+      var select = document.getElementById(msg.select_id);
+      var confirmed = document.getElementById(msg.confirmed_id);
+      if (select && msg.size && confirmed && !confirmed.checked) {
+        select.value = msg.size;
+        confirmed.checked = false;
+      }
+      if (text) text.innerText = msg.text;
+    });
     Shiny.addCustomMessageHandler('resetButton', function(msg) {
       var el = document.getElementById(msg.id);
       if (el) { el.disabled = false; el.innerText = msg.label; }
+      (msg.enable_ids || []).forEach(function(id) {
+        var control = document.getElementById(id);
+        if (control) control.disabled = false;
+      });
     });
     Shiny.addCustomMessageHandler('updateIssueList', function(msg) {
       var el = document.getElementById(msg.div_id);
@@ -907,6 +968,16 @@ server <- function(input, output, session) {
     title_id <- info$title_id
     desc_id  <- info$desc_id
     btn_id   <- info$btn_id
+    issue_size <- normalize_issue_size(info$issue_size)
+    size_confirmed <- isTRUE(info$size_confirmed)
+    on.exit(
+      session$sendCustomMessage(
+        "resetButton",
+        list(id = btn_id, label = "Generate title and description with AI",
+             enable_ids = c(info$size_id, info$size_confirmed_id))
+      ),
+      add = TRUE
+    )
 
     # If the panel has an associated dashboard graph, render it to a PNG and
     # attach it to the description call so the LLM diagnoses from the graph
@@ -914,6 +985,10 @@ server <- function(input, output, session) {
     plot_key  <- if (is.null(info$plot_key)) "" else info$plot_key
     img_path  <- NULL
     img_capt  <- NULL
+    on.exit(
+      if (!is.null(img_path) && file.exists(img_path)) unlink(img_path),
+      add = TRUE
+    )
     if (nzchar(plot_key)) {
       plot_source <- issue_plot_sources[[plot_key]]
       plot_obj <- if (!is.null(plot_source)) plot_source()
@@ -925,22 +1000,33 @@ server <- function(input, output, session) {
 
     withProgress(message = "Generating with AI...", value = 0.3, {
       title <- llm_generate_title(path, auto_summary)
-      setProgress(0.6, detail = "Generating description...")
+      setProgress(0.5, detail = "Suggesting issue size...")
+      suggested_size <- llm_suggest_issue_size(path, auto_summary)
+      # Size controls are locked during generation, so the description and
+      # the selector use the same choice. AI cannot replace a confirmed size.
+      if (!size_confirmed) issue_size <- suggested_size
+      session$sendCustomMessage("setIssueSizeSuggestion", list(
+        text_id = info$size_suggestion_id,
+        select_id = info$size_id,
+        confirmed_id = info$size_confirmed_id,
+        size = issue_size,
+        text = paste0("AI suggestion: ", suggested_size,
+                      if (size_confirmed)
+                        paste0(". Using your confirmed size: ", issue_size, ".")
+                      else ". Please confirm or change the size, then tick User confirmed.")
+      ))
+      setProgress(0.7, detail = "Generating description...")
       desc  <- llm_generate_description(path, auto_summary,
                                         image = img_path,
-                                        graph_caption = img_capt)
+                                        graph_caption = img_capt,
+                                        issue_size = issue_size,
+                                        size_confirmed = size_confirmed)
     })
-    if (!is.null(img_path)) unlink(img_path)
-
     # Push results back into the form fields via JS
     session$sendCustomMessage("fillField", list(id = title_id, value = title))
     if (nchar(desc) > 0) {
       session$sendCustomMessage("fillField", list(id = desc_id, value = desc))
     }
-
-    # Re-enable the button
-    session$sendCustomMessage("resetButton",
-                              list(id = btn_id, label = "Generate title and description with AI"))
 
     if (nchar(desc) > 0) {
       showNotification("AI title and description generated.",
@@ -963,7 +1049,19 @@ server <- function(input, output, session) {
       return()
     }
 
-    labels <- issue_path_to_labels(info$path)
+    if (!isTRUE(info$size_confirmed)) {
+      showNotification("Please select an issue size and tick User confirmed before posting.",
+                       type = "error", duration = 5)
+      return()
+    }
+
+    issue_size <- normalize_issue_size(info$issue_size)
+    desc <- paste0(
+      desc,
+      "\n\n---\n\n**Issue size:** `", issue_size,
+      "` (confirmed in the dashboard before posting.)"
+    )
+    labels <- issue_labels(info$path, issue_size)
     has_plot <- isTRUE(info$has_plot)
     asset_repo <- trimws(info$asset_repo)
 

@@ -304,6 +304,23 @@ issue_path_to_labels <- function(path) {
   trimws(strsplit(path, "\\s*/\\s*")[[1]])
 }
 
+# Issue-size labels are separate from the four path labels. The size is a
+# maintainer-confirmed classification, not an immutable property of the path.
+issue_size_values <- c("small", "medium", "large")
+
+normalize_issue_size <- function(size, fallback = "medium") {
+  size <- tolower(trimws(as.character(size)[1]))
+  if (is.na(size) || !size %in% issue_size_values) fallback else size
+}
+
+issue_size_label <- function(size) {
+  paste0("size:", normalize_issue_size(size))
+}
+
+issue_labels <- function(path, size = "medium") {
+  c(issue_path_to_labels(path), issue_size_label(size))
+}
+
 # Convert a data.frame (first N rows) to a markdown table string
 df_to_md_table <- function(df, max_rows = 10) {
   if (is.null(df) || nrow(df) == 0) return("")
@@ -831,51 +848,59 @@ gh_append_data_link_to_issue <- function(repo, issue_number, csv_url,
 
 # --- LLM integration (OpenAI Codex CLI) ---
 
-# NULL = use Codex CLI's default model (currently gpt-5.5)
-codex_model <- NULL
+# Pin the dashboard to the current Astra Codex model rather than inheriting
+# whichever model happens to be configured as the CLI default.
+codex_model <- "gpt-6-astra"
+# Keep dashboard drafting responsive independently of the user's CLI effort.
+codex_reasoning_effort <- "medium"
 
-# Low-level Codex query (adapted from R056 for long prompts).
-# Writes the prompt to a temp file, then asks Codex to follow the
-# instructions in that file. Returns the response string, or NULL on failure.
+# Low-level Codex query. Returns the response string, or NULL on failure.
 # image: optional path(s) to image files attached to the prompt (codex exec
 # -i), so the model can actually look at a graph instead of only reading
 # numbers about it.
 codex_query <- function(prompt, model = codex_model, image = NULL) {
   out_file    <- tempfile(fileext = ".txt")
-  prompt_file <- tempfile(fileext = ".md")
+  log_file    <- tempfile(fileext = ".log")
   tryCatch({
-    writeLines(prompt, prompt_file)
-    instruction <- paste0(
-      "Read the file at ", prompt_file,
-      " and follow the instructions in it exactly."
+    args <- c(
+      "exec",
+      "--sandbox", "read-only",
+      "--skip-git-repo-check",
+      "--ephemeral"
     )
-    model_flag <- if (!is.null(model)) {
-      paste("-m", shQuote(model))
-    } else ""
+    if (!is.null(model)) args <- c(args, "-m", shQuote(model))
+    args <- c(args, "-c", shQuote(paste0(
+      'model_reasoning_effort="', codex_reasoning_effort, '"'
+    )))
     if (is.null(image)) image <- character(0)
     image <- image[file.exists(image)]
-    image_flags <- if (length(image) > 0) {
-      paste("-i", vapply(image, shQuote, character(1)), collapse = " ")
-    } else ""
-    cmd <- paste(
-      "codex exec",
-      "--dangerously-bypass-approvals-and-sandbox",
-      "--skip-git-repo-check",
-      "--ephemeral",
-      model_flag,
-      image_flags,
-      "-o", shQuote(out_file),
-      shQuote(instruction),
-      "< /dev/null 2>/dev/null"
-    )
-    system(cmd, ignore.stdout = TRUE, ignore.stderr = TRUE)
-    if (!file.exists(out_file)) return(NULL)
+    if (length(image) > 0) {
+      args <- c(args, as.vector(rbind("-i", shQuote(image))))
+    }
+    # The separator keeps prompts beginning with words such as "Read" from
+    # being interpreted as exec subcommands by newer Codex CLI versions.
+    args <- c(args, "-o", shQuote(out_file), "--", shQuote(prompt))
+
+    # The dashboard is Linux-based and the timeout prevents a stalled CLI
+    # process from holding the Shiny observer indefinitely.
+    status <- system2("timeout", c("120", "codex", args),
+                      stdout = log_file, stderr = log_file)
+    if (!identical(status, 0L) || !file.exists(out_file)) {
+      diagnostic <- if (file.exists(log_file)) {
+        trimws(paste(readLines(log_file, warn = FALSE), collapse = " "))
+      } else ""
+      if (nchar(diagnostic) > 500) diagnostic <- paste0(substr(diagnostic, 1, 497), "...")
+      message("Codex query failed (status ", status, ")",
+              if (nzchar(diagnostic)) paste0(": ", diagnostic) else "")
+      return(NULL)
+    }
     response <- trimws(paste(readLines(out_file, warn = FALSE),
                              collapse = "\n"))
     if (nchar(response) == 0) NULL else response
   }, error = function(e) NULL,
   finally = {
-    if (file.exists(prompt_file)) unlink(prompt_file)
+    if (file.exists(out_file)) unlink(out_file)
+    if (file.exists(log_file)) unlink(log_file)
   })
 }
 
@@ -913,7 +938,9 @@ build_title_prompt <- function(issue_path_str, auto_summary) {
 # graph shows whether coverage was complete, eroding, or absent around the
 # relevant dates.
 build_description_prompt <- function(issue_path_str, auto_summary,
-                                     graph_caption = NULL) {
+                                     graph_caption = NULL,
+                                     issue_size = "medium",
+                                     size_confirmed = FALSE) {
   graph_part <- if (!is.null(graph_caption)) {
     paste0(
       "Attached is an image of the dashboard graph (", graph_caption, "). ",
@@ -939,6 +966,15 @@ build_description_prompt <- function(issue_path_str, auto_summary,
     "Include a ## Suggested fix section with ideas on how this might ",
     "be resolved, but make clear that these are suggestions that need ",
     "to be verified by the user. ",
+    if (isTRUE(size_confirmed)) paste0(
+      "The maintainer-confirmed issue-size classification is `",
+      normalize_issue_size(issue_size), "`; do not change or reinterpret it. "
+    ) else paste0(
+      "The provisional issue-size suggestion is `",
+      normalize_issue_size(issue_size), "`; it has not been confirmed by the maintainer. "
+    ),
+    "Do not include an issue-size classification or confirmation claim in ",
+    "the description; the dashboard appends the final confirmed size when posting. ",
     "Always refer to politicians by their full pers_id ",
     "(e.g. 'NL_Aartsen_Thierry_1989'), not by name alone. ",
     "Use markdown formatting. ",
@@ -948,18 +984,57 @@ build_description_prompt <- function(issue_path_str, auto_summary,
   )
 }
 
+# Ask the model for a provisional size suggestion. The dashboard displays this
+# separately; the user must still confirm the actual selector value.
+build_size_prompt <- function(issue_path_str, auto_summary) {
+  paste0(
+    "You are helping triage a data-quality issue in the Political Careers ",
+    "In Comparison Project. Suggest exactly one issue-size label based on ",
+    "the technical details below. Classify the expected scope of the fix, ",
+    "not the severity of the data problem. Use these rules: ",
+    "small = up to 25 data points or an isolated straightforward correction; ",
+    "medium = roughly 26-500 data points or a localized multi-record/rule fix; ",
+    "large = more than roughly 500 data points, broad structural impact, or ",
+    "substantial source/pipeline work. Existing-source coverage can make a ",
+    "large issue easier to script, but does not change its size. ",
+    "Reply with exactly one token: small, medium, or large. Do not explain.\n\n",
+    "Issue path: ", issue_path_str, "\n\n",
+    "Technical details:\n", auto_summary
+  )
+}
+
+normalize_llm_issue_size <- function(result) {
+  if (is.null(result) || !nzchar(trimws(result))) return("medium")
+  token <- tolower(trimws(strsplit(trimws(result), "\\s+")[[1]][1]))
+  normalize_issue_size(token, fallback = "medium")
+}
+
+llm_suggest_issue_size <- function(issue_path_str, auto_summary) {
+  normalize_llm_issue_size(codex_query(
+    build_size_prompt(issue_path_str, auto_summary)
+  ))
+}
+
+# Normalize the title independently of prompt compliance so malformed model
+# output cannot become a multiline or overlong GitHub issue title.
+normalize_llm_title <- function(result, fallback) {
+  if (is.null(result) || !nzchar(trimws(result))) return(fallback)
+  title <- strsplit(trimws(result), "\\r?\\n")[[1]][1]
+  title <- sub("^#+\\s*", "", title)
+  title <- trimws(gsub("[[:space:]]+", " ", title))
+  title <- sub('^"(.*)"$', "\\1", title)
+  if (!nzchar(title) || tolower(title) == "error" || nchar(title) > 80) {
+    fallback
+  } else title
+}
+
 # Generate a human-readable title via LLM.
-# Returns the LLM title, or the original path as fallback.
+# Returns the normalized LLM title, or the original path as fallback.
 llm_generate_title <- function(issue_path_str, auto_summary) {
   result <- codex_query(
     build_title_prompt(issue_path_str, auto_summary)
   )
-  if (is.null(result) || nchar(result) == 0 ||
-      tolower(result) == "error") {
-    return(issue_path_str)
-  }
-  # Strip surrounding quotes if the LLM added them
-  gsub("^\"|\"$", "", result)
+  normalize_llm_title(result, issue_path_str)
 }
 
 # Generate an issue description via LLM.
@@ -968,10 +1043,14 @@ llm_generate_title <- function(issue_path_str, auto_summary) {
 # prompt tells the model to base its diagnosis on the graph.
 # Returns the LLM description, or empty string as fallback.
 llm_generate_description <- function(issue_path_str, auto_summary,
-                                     image = NULL, graph_caption = NULL) {
+                                     image = NULL, graph_caption = NULL,
+                                     issue_size = "medium",
+                                     size_confirmed = FALSE) {
   result <- codex_query(
     build_description_prompt(issue_path_str, auto_summary,
-                             graph_caption = graph_caption),
+                             graph_caption = graph_caption,
+                             issue_size = issue_size,
+                             size_confirmed = size_confirmed),
     image = image
   )
   if (is.null(result) || nchar(result) == 0 ||
