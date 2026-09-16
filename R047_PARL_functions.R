@@ -23,6 +23,7 @@ SIZE_CHANGE_DATES <- list(
   "US_NT-HR_1935" = as.Date("1936-02-14"),
   "US_NT-HR_1945" = as.Date("1946-07-04"),
   "US_NT-HR_1971" = as.Date("1971-03-23"),
+  "US_NT-SE_1959" = as.Date("1959-08-21"),  # Hawaii admission: 98 -> 100
   "DE_NT-BT_1949" = as.Date("1952-02-01"),  # West Berlin delegation 8 -> 19
   "DE_NT-BT_1953" = as.Date("1957-01-04"),  # Saarland accession: 509 -> 519
   "DE_NT-BT_1987" = as.Date("1990-10-03"),  # reunification: 519 -> 663
