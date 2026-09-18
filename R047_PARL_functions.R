@@ -17,6 +17,7 @@ SIZE_CHANGE_DATES <- list(
   # Voting-seat changes; nonvoting-only transitions are intentionally absent.
   "US_NT-HR_1795" = as.Date("1796-06-01"),  # Tennessee statehood: 105 -> 106
   "US_NT-HR_1907" = as.Date("1907-11-16"),  # Oklahoma statehood: 386 -> 391
+  "US_NT-HR_1959" = as.Date("1959-08-21"),  # Hawaii admission: 436 -> 437
   "US_NT-SE_1959" = as.Date("1959-08-21"),  # Hawaii admission: 98 -> 100
   "DE_NT-BT_1953" = as.Date("1957-01-04"),  # Saarland accession: 487 -> 497
   "DE_NT-BT_1987" = as.Date(c("1990-06-21", "1990-10-03")),  # Berlin voting rights, reunification
